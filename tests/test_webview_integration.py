@@ -91,7 +91,7 @@ class TestWebViewIntegration(unittest.TestCase):
         self,
         mock_launch_background: MagicMock,
     ) -> None:
-        monitor = StatusMonitor(MagicMock())
+        monitor = StatusMonitor(MagicMock(), button_combo_window_seconds=0)
         webview_controller = _FakeWebViewController()
         handlers = KioskMonitorHandlers(
             _FakeController(),
@@ -115,11 +115,11 @@ class TestWebViewIntegration(unittest.TestCase):
         self.assertEqual(webview_controller.show_meet_web_calls, 1)
 
     @patch.object(kiosk_events_mod, "launch_background_browser")
-    def test_repeated_right_button_status_opens_meet_each_time(
+    def test_repeated_right_button_press_after_release_opens_meet_each_time(
         self,
         mock_launch_background: MagicMock,
     ) -> None:
-        monitor = StatusMonitor(MagicMock())
+        monitor = StatusMonitor(MagicMock(), button_combo_window_seconds=0)
         webview_controller = _FakeWebViewController()
         handlers = KioskMonitorHandlers(
             _FakeController(),
@@ -137,6 +137,9 @@ class TestWebViewIntegration(unittest.TestCase):
         ):
             monitor._process_status(
                 self._make_status(person_detected=0, right_button=1)
+            )
+            monitor._process_status(
+                self._make_status(person_detected=0, right_button=0)
             )
             monitor._process_status(
                 self._make_status(person_detected=0, right_button=1)

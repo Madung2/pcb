@@ -164,7 +164,7 @@ class TestMeetOnRightButton(unittest.TestCase):
         mock_config.meet_web_url = "https://meet.example.com/test"
         mock_config.vacant_idle_close_seconds = 9999
 
-        monitor = StatusMonitor(MagicMock())
+        monitor = StatusMonitor(MagicMock(), button_combo_window_seconds=0)
         controller = _DummyController()
         webview_ctrl = _MockWebViewController()
         handlers = KioskMonitorHandlers(

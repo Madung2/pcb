@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
+from .config import PCB_EVENT_POLL_INTERVAL_SECONDS
 from .status_monitor import StatusMonitor
 from .ws_bridge import WSBridge
 
@@ -16,18 +18,34 @@ logger = logging.getLogger(__name__)
 async def _status_poll_loop(
     monitor: StatusMonitor,
     bridge: WSBridge | None,
-    interval_sec: float,
+    status_report_interval_sec: float,
+    event_poll_interval_sec: float = PCB_EVENT_POLL_INTERVAL_SECONDS,
 ) -> None:
-    """PCB 상태를 낮은 빈도로 조회하고 조회 직후 WS에 전송한다."""
+    """PCB 버튼/상태는 빠르게 조회하고, WS 상태 보고만 낮은 빈도로 전송한다."""
+    status_report_interval_sec = float(status_report_interval_sec)
+    event_poll_interval_sec = max(0.05, float(event_poll_interval_sec))
+    last_status_sent_at = -status_report_interval_sec
+    logger.info(
+        "PCB 버튼/상태 빠른 폴링 시작: event_interval=%.2fs status_report_interval=%.1fs",
+        event_poll_interval_sec,
+        status_report_interval_sec,
+    )
     try:
         while True:
             try:
                 await asyncio.to_thread(monitor.poll_once)
-                if bridge is not None:
+                now = time.monotonic()
+                should_send_status = (
+                    bridge is not None
+                    and monitor.last_status is not None
+                    and now - last_status_sent_at >= status_report_interval_sec
+                )
+                if should_send_status:
                     await bridge.send_status()
+                    last_status_sent_at = now
             except Exception:
                 logger.exception("PCB 상태 조회/전송 실패 — 다음 주기까지 계속합니다.")
-            await asyncio.sleep(interval_sec)
+            await asyncio.sleep(event_poll_interval_sec)
     except asyncio.CancelledError:
         logger.debug("상태 조회 루프 취소됨")
         raise

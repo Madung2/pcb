@@ -67,7 +67,7 @@ class TestLeftButtonOpensDoor(unittest.TestCase):
 
     def test_status_monitor_left_edge_triggers_open_door(self) -> None:
         """폴링 직전 상태가 좌=0·우=0 이고, 다음 status에서 좌만 눌리면 도어 오픈."""
-        monitor = StatusMonitor(MagicMock())
+        monitor = StatusMonitor(MagicMock(), button_combo_window_seconds=0)
         controller = _TrackingController()
         handlers = KioskMonitorHandlers(
             controller,

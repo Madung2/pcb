@@ -7,6 +7,7 @@ asyncio 기반으로 동작하여 WebSocket 브릿지와 함께 사용 가능.
 
 import asyncio
 import logging
+import threading
 from typing import Callable, Optional
 
 import serial
@@ -97,6 +98,7 @@ class SerialManager:
         self._running = False
         self._recv_buffer = b""
         self.last_open_error: BaseException | None = None
+        self._io_lock = threading.RLock()
 
     # ──────────────────────────────────────────
     # 연결 관리
@@ -168,8 +170,9 @@ class SerialManager:
             return False
 
         try:
-            written = self._serial.write(frame)
-            self._serial.flush()
+            with self._io_lock:
+                written = self._serial.write(frame)
+                self._serial.flush()
             logger.debug(f"TX ({written}B): {frame.hex(' ')}")
             return True
         except serial.SerialException as e:
@@ -188,31 +191,32 @@ class SerialManager:
         if not self.is_connected:
             return None
 
-        old_timeout = self._serial.timeout
-        if timeout is not None:
-            self._serial.timeout = timeout
+        with self._io_lock:
+            old_timeout = self._serial.timeout
+            if timeout is not None:
+                self._serial.timeout = timeout
 
-        try:
-            buf = self._recv_buffer
+            try:
+                buf = self._recv_buffer
 
-            while True:
-                chunk = self._serial.read(256)
-                if not chunk:
-                    break  # 타임아웃
+                while True:
+                    chunk = self._serial.read(256)
+                    if not chunk:
+                        break  # 타임아웃
 
-                buf += chunk
-                frames, buf = FrameParser.extract_frames(buf)
+                    buf += chunk
+                    frames, buf = FrameParser.extract_frames(buf)
 
-                if frames:
-                    self._recv_buffer = buf
-                    frame = frames[0]
-                    logger.debug(f"RX ({len(frame)}B): {frame.hex(' ')}")
-                    return frame
+                    if frames:
+                        self._recv_buffer = buf
+                        frame = frames[0]
+                        logger.debug(f"RX ({len(frame)}B): {frame.hex(' ')}")
+                        return frame
 
-            self._recv_buffer = buf
-            return None
-        finally:
-            self._serial.timeout = old_timeout
+                self._recv_buffer = buf
+                return None
+            finally:
+                self._serial.timeout = old_timeout
 
     def send_and_receive(
         self, frame: bytes, timeout: float = 0.5
@@ -226,9 +230,10 @@ class SerialManager:
         Returns:
             응답 프레임 또는 None
         """
-        if not self.send(frame):
-            return None
-        return self.receive(timeout=timeout)
+        with self._io_lock:
+            if not self.send(frame):
+                return None
+            return self.receive(timeout=timeout)
 
     # ──────────────────────────────────────────
     # 비동기 수신 루프 (이벤트 기반)

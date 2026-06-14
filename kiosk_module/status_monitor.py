@@ -20,6 +20,8 @@ from .serial_manager import SerialManager
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_BUTTON_COMBO_WINDOW_SECONDS = 0.15
+
 
 class StatusMonitor:
     """PCB 상태 모니터링 클래스.
@@ -38,10 +40,20 @@ class StatusMonitor:
         await monitor.start_polling(interval=1.0)
     """
 
-    def __init__(self, serial_manager: SerialManager):
+    def __init__(
+        self,
+        serial_manager: SerialManager,
+        *,
+        button_combo_window_seconds: float = DEFAULT_BUTTON_COMBO_WINDOW_SECONDS,
+    ):
         self._serial = serial_manager
         self._polling = False
         self._last_status: Optional[StatusResponse] = None
+        self._button_combo_window_seconds = max(0.0, float(button_combo_window_seconds))
+        self._pending_button_started_at: float | None = None
+        self._pending_left_pressed = False
+        self._pending_right_pressed = False
+        self._button_action_latched = False
 
         # 콜백 함수들
         self.on_status_changed: Optional[Callable[[StatusResponse], None]] = None
@@ -65,16 +77,16 @@ class StatusMonitor:
         response = self._serial.send_and_receive(frame, timeout=timeout)
 
         if response is None:
-            logger.warning(f"상태 응답 없음 (타임아웃)")
+            logger.debug("상태 응답 없음 (타임아웃)")
             return None
 
         if not FrameParser.validate_frame(response):
-            logger.warning(f"상태 응답 프레임 불량: {response.hex(' ')}")
+            logger.debug("상태 응답 프레임 불량: %s", response.hex(" "))
             return None
 
         status = FrameParser.parse_status_response(response)
         if status is None:
-            logger.warning(f"상태 파싱 실패: {response.hex(' ')}")
+            logger.debug("상태 파싱 실패: %s", response.hex(" "))
             return None
 
         logger.debug(
@@ -157,7 +169,7 @@ class StatusMonitor:
             changed = self._has_changed(previous, status)
 
             if changed:
-                logger.info(f"상태 변화 감지!")
+                logger.debug("상태 변화 감지")
                 if self.on_status_changed:
                     try:
                         self.on_status_changed(status)
@@ -174,27 +186,70 @@ class StatusMonitor:
                     except Exception as e:
                         logger.error(f"on_person_detected 콜백 에러: {e}")
 
-        # 버튼 필드는 물리 상태라기보다 PCB가 보낸 클릭 이벤트로 취급한다.
-        # 같은 버튼값(1)이 연속 수신돼도 매 수신마다 버튼 동작을 실행한다.
+        self._process_button_status(status)
+
+        self._last_status = status
+
+    def _process_button_status(self, status: StatusResponse) -> None:
+        """버튼 상태를 조합 이벤트로 변환한다.
+
+        빠른 폴링 중 버튼을 누르고 있는 동안 같은 동작이 반복되지 않도록 한 번만
+        이벤트를 발생시킨다. 한쪽 버튼이 먼저 감지된 직후 반대쪽도 들어오는 경우를
+        위해 짧은 조합 유예 시간 동안 좌/우 상태를 합친다.
+        """
         if self.on_button_pressed:
             ln = status.button_left_status
             rn = status.button_right_status
             left_pressed = ln != 0
             right_pressed = rn != 0
-            if left_pressed or right_pressed:
-                try:
-                    self.on_button_pressed(
-                        ButtonPressEvent(
-                            left_pressed=left_pressed,
-                            right_pressed=right_pressed,
-                            left_just_pressed=left_pressed,
-                            right_just_pressed=right_pressed,
-                        )
-                    )
-                except Exception as e:
-                    logger.error(f"on_button_pressed 콜백 에러: {e}")
 
-        self._last_status = status
+            if not left_pressed and not right_pressed:
+                if self._pending_button_started_at is not None:
+                    self._emit_pending_button_event()
+                self._clear_pending_button_event()
+                self._button_action_latched = False
+                return
+
+            if self._button_action_latched:
+                return
+
+            now = time.monotonic()
+            if self._pending_button_started_at is None:
+                self._pending_button_started_at = now
+
+            self._pending_left_pressed = self._pending_left_pressed or left_pressed
+            self._pending_right_pressed = self._pending_right_pressed or right_pressed
+
+            if now - self._pending_button_started_at >= self._button_combo_window_seconds:
+                self._emit_pending_button_event()
+                self._button_action_latched = True
+
+    def _emit_pending_button_event(self) -> None:
+        if self._pending_button_started_at is None:
+            return
+        left_pressed = self._pending_left_pressed
+        right_pressed = self._pending_right_pressed
+        if not left_pressed and not right_pressed:
+            return
+        try:
+            if self.on_button_pressed:
+                self.on_button_pressed(
+                    ButtonPressEvent(
+                        left_pressed=left_pressed,
+                        right_pressed=right_pressed,
+                        left_just_pressed=left_pressed,
+                        right_just_pressed=right_pressed,
+                    )
+                )
+        except Exception as e:
+            logger.error(f"on_button_pressed 콜백 에러: {e}")
+        finally:
+            self._clear_pending_button_event()
+
+    def _clear_pending_button_event(self) -> None:
+        self._pending_button_started_at = None
+        self._pending_left_pressed = False
+        self._pending_right_pressed = False
 
     @staticmethod
     def _has_changed(old: StatusResponse, new: StatusResponse) -> bool:

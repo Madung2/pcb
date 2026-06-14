@@ -99,7 +99,7 @@ class KioskMonitorHandlers:
                 logger.exception("PCB 상태 브로드캐스트 콜백 실패")
 
     def on_status_changed(self, _status: StatusResponse) -> None:
-        logger.info(f"[이벤트] 상태 변화: {self._monitor.to_dict()}")
+        logger.debug("[이벤트] 상태 변화: %s", self._monitor.to_dict())
 
     def on_person_detected(self, detected: bool) -> None:
         logger.info(
