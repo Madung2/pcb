@@ -1,11 +1,11 @@
 """
-별도 시리얼 포트(``VOLUME_SERIAL_PORT``·``VOLUME_BAUDRATE``)에서
+별도 시리얼 포트(``VOLUME_SERIAL_PORT``·38400bps)에서
 문자 ``U`` / ``D`` 수신 시 Windows OS 마스터 볼륨을 올리거나 내린다.
 
 사용 예:
     uv run python -m kiosk_module.volume_serial_controller
 
-키오스크 실행 시에는 ``VOLUME_SERIAL_ENABLED=true`` 로 ``kiosk_runner`` 수명 주기에
+키오스크 실행 시에는 장치 타입이 ``KIOSK`` 이면 ``kiosk_runner`` 수명 주기에
 같은 리스너가 함께 시작·종료됩니다.
 """
 
@@ -41,12 +41,7 @@ def _hex_code_set_from_csv(csv: str) -> frozenset[str]:
 
 
 def _volume_baud_from_env() -> int:
-    raw = (
-        os.getenv("VOLUME_BAUDRATE")
-        or os.getenv("VOLUME_SERIAL_BAUDRATE")
-        or "38400"
-    ).strip()
-    return int(raw)
+    return 38400
 
 
 VK_VOLUME_UP = 0xAF

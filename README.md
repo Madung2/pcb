@@ -59,10 +59,9 @@ uv sync --group dev
 | `SERIAL_PORT`           | `COM3`                   | 시리얼 포트 이름                  |
 | `WS_RECONNECT_INTERVAL` | `5.0`                    | 끊김 후 재연결 대기(초)             |
 | `WEBVIEW_ENABLED`       | `false`                  | Windows 통합 WebView 모드 활성화 |
-| `WEBVIEW_WS_URL`        | *(비움)*                 | 백엔드·웹뷰 공통 WS URL. 비우면 `WEBSOCKET_ADDR` 사용 |
-| `WS_URL`                | *(비움)*                 | 레거시 이름; `WEBVIEW_WS_URL`과 동일 필드로 합쳐짐 |
+| `DEVICE_ID`             | *(비움)*                 | 백엔드 장치 식별자. API/WebSocket 모두 `device_id`로 전송 |
+| `WEBSOCKET_ADDR`        | *(비움)*                 | 백엔드·웹뷰 공통 WS URL. `device_id` 쿼리는 실행 시 자동 추가 |
 | `WEBVIEW_DEVTOOLS`      | `false`                  | `pywebview` 개발자 도구 노출 |
-| `WEBVIEW_TRAY_ENABLED`  | `true`                   | Windows 트레이 아이콘 사용 여부 |
 | `LOG_LEVEL`             | `INFO`                   | 로그 레벨 (`DEBUG`, `INFO`, …) |
 
 
@@ -116,9 +115,9 @@ uv run pyinstaller kiosk_gui.spec --clean --noconfirm
   알지 못하는 키는 보존(merge).
 
 `gui_main.py` 화면:
-- 시리얼 포트 선택 + USB 키워드 필터
-- `.env` 의 주요 변수 인라인 편집 (KIOSK_ID·WEBVIEW_WS_URL·LOG_LEVEL 등)
-- 볼륨 노브용 시리얼 포트/타임아웃 편집
+- 시리얼 포트 선택 + 고정 USB 키워드 필터
+- `.env` 의 주요 변수 인라인 편집 (`DEVICE_ID`, `WEBSOCKET_ADDR`, `LOG_LEVEL` 등)
+- 볼륨 노브용 시리얼 포트 편집 (키오스크 모드에서 항상 사용)
 - `[연결]` — PCB 통신 시작, `[끊기]` — 정상 종료
 - `[.env 저장]` — 위 값들을 `.env` 파일로 영구 저장
 

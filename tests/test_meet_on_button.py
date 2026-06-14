@@ -74,7 +74,7 @@ class TestMeetOnRightButton(unittest.TestCase):
         # ysoh 2026-06-14
         mock_config.meet_web_url = "https://meet.example.com/test"
         mock_config.vacant_idle_close_seconds = 9999
-        mock_config.kiosk_id = "test-kiosk"
+        mock_config.device_id = "test-device"
 
         controller = _DummyController()
         webview_ctrl = _MockWebViewController()

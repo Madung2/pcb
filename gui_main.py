@@ -15,10 +15,11 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QPalette
 from PyQt5.QtWidgets import (
     QApplication,
@@ -56,6 +57,198 @@ from kiosk_module.system_logging import (
 )
 from kiosk_module.serial_manager import SerialManager
 from kiosk_module.test_input_ipc import CMD_BTN_RIGHT, enqueue_test_command
+
+
+# GUI가 더 이상 저장하지 않는 예전 환경변수. 부모 프로세스 환경에 남아 있어도
+# 자식 main.py 실행에는 전달하지 않아 현재 화면/저장값만 적용되게 한다.
+DEPRECATED_GUI_ENV_KEYS = {
+    "KIOSK_ID",
+    "KIOSK_BROWSER_CMD",
+    "WEBVIEW_WS_KIOSK_ID",
+    "WEBVIEW_WS_URL",
+    "WS_URL",
+    "WEBVIEW_WS_RECONNECT_INTERVAL",
+    "WEBVIEW_SCREENSHOT_INTERVAL",
+    "WEBVIEW_ERROR_REFRESH_INTERVAL",
+    "WEBVIEW_NETWORK_PROBE_TIMEOUT",
+    "AUTO_OPEN_DOOR_ON_PERSON",
+    "DEFAULT_ASSET_API_BASE_URL",
+    "ASSET_API_TOKEN",
+    "ASSET_API_TIMEOUT",
+    "ASSET_NEARBY_RADIUS",
+    "ASSET_NEARBY_COUNT",
+    "ASSET_NEARBY_TYPE",
+    "NEARBY_ASSET_CACHE_PATH",
+    "NEARBY_ASSET_REFRESH_INTERVAL",
+    "CURRENT_LATITUDE",
+    "CURRENT_LONGITUDE",
+    "MEET_WEB_URL",
+    "PERSON_DETECTED_MP3_PATH",
+    "PERSON_DETECTED_TTS_TEXT",
+    "PERSON_DETECTED_TTS_LANG",
+    "PERSON_DETECTED_TTS_AUTOGEN",
+    "tts_text",
+    "tts_text2",
+    "SERIAL_BAUDRATE",
+    "SERIAL_PORT_DESCRIPTION_KEYWORD",
+    "WS_ENABLED",
+    "WEBVIEW_TRAY_ENABLED",
+    "VOLUME_SERIAL_ENABLED",
+    "VOLUME_BAUDRATE",
+    "VOLUME_SERIAL_BAUDRATE",
+    "VOLUME_SERIAL_TIMEOUT",
+    "VOLUME_UP_HEX_CODES",
+    "VOLUME_DOWN_HEX_CODES",
+    "TEST_MODE_ENABLED",
+}
+
+
+def _detect_pcb_on_port(
+    port: str,
+    baudrate: int,
+    *,
+    timeout: float = 1.0,
+    attempts: int = 2,
+    emit=None,
+) -> bool:
+    """``port``에 PCB 상태 요청(``S``) 프레임을 보내고 유효한 상태 응답이 오면 True."""
+    import serial
+
+    from pcb_connection_check import (
+        build_status_request_frame,
+        extract_fixed_status_frames,
+        extract_frames,
+        parse_status_response,
+    )
+
+    frame = build_status_request_frame()
+    try:
+        with serial.Serial(
+            port=port,
+            baudrate=baudrate,
+            bytesize=serial.EIGHTBITS,
+            stopbits=serial.STOPBITS_ONE,
+            parity=serial.PARITY_NONE,
+            timeout=0.1,
+            write_timeout=1.0,
+        ) as ser:
+            ser.reset_input_buffer()
+            ser.reset_output_buffer()
+            for _ in range(max(1, attempts)):
+                ser.write(frame)
+                ser.flush()
+                raw = b""
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    chunk = ser.read(ser.in_waiting or 1)
+                    if not chunk:
+                        continue
+                    raw += chunk
+                    frames, _ = extract_frames(raw)
+                    frames = [*frames, *extract_fixed_status_frames(raw)]
+                    if any(parse_status_response(f) is not None for f in frames):
+                        return True
+                time.sleep(0.2)
+    except Exception as exc:  # serial.SerialException 외 권한/사용중 등 포함
+        if emit:
+            emit(f"  {port}: 열기 실패 ({exc})")
+        return False
+    return False
+
+
+def _detect_knob_on_port(
+    port: str,
+    baudrate: int,
+    *,
+    listen_seconds: float = 4.0,
+    emit=None,
+) -> bool:
+    """``port``를 열고 노브가 보내는 U/D 바이트를 ``listen_seconds`` 동안 기다린다."""
+    import serial
+
+    try:
+        with serial.Serial(port=port, baudrate=baudrate, timeout=0.1) as ser:
+            ser.reset_input_buffer()
+            deadline = time.monotonic() + listen_seconds
+            while time.monotonic() < deadline:
+                chunk = ser.read(ser.in_waiting or 1)
+                if not chunk:
+                    continue
+                text = chunk.decode(errors="ignore").upper()
+                if "U" in text or "D" in text:
+                    return True
+    except Exception as exc:
+        if emit:
+            emit(f"  {port}: 열기 실패 ({exc})")
+        return False
+    return False
+
+
+class PortScanWorker(QThread):
+    """모든 COM 포트를 스캔해서 PCB 응답 포트와 노브 응답 포트를 찾는 백그라운드 워커."""
+
+    progress = pyqtSignal(str)
+    result = pyqtSignal(object, object)  # (pcb_port|None, knob_port|None)
+
+    def __init__(
+        self,
+        pcb_baudrate: int,
+        knob_baudrate: int,
+        *,
+        knob_listen_seconds: float = 4.0,
+    ) -> None:
+        super().__init__()
+        self._pcb_baud = pcb_baudrate
+        self._knob_baud = knob_baudrate
+        self._knob_listen = knob_listen_seconds
+
+    def run(self) -> None:  # noqa: D401 - QThread 진입점
+        from pcb_connection_check import list_port_rows, port_label
+
+        rows = list_port_rows()
+        ports = [getattr(r, "device", "") for r in rows if getattr(r, "device", "")]
+        if not ports:
+            self.progress.emit("감지된 COM 포트가 없습니다. 케이블/전원을 확인하세요.")
+            self.result.emit(None, None)
+            return
+
+        self.progress.emit(f"감지된 포트 {len(ports)}개:")
+        for r in rows:
+            self.progress.emit(f"  - {port_label(r)}")
+
+        self.progress.emit("PCB 응답 포트 검색 중... (상태 요청 'S' 프레임 전송)")
+        pcb_port: Optional[str] = None
+        for p in ports:
+            self.progress.emit(f"[PCB] {p} 확인 중...")
+            if _detect_pcb_on_port(p, self._pcb_baud, emit=self.progress.emit):
+                pcb_port = p
+                self.progress.emit(f"[PCB] 응답 확인 → {p}")
+                break
+        if not pcb_port:
+            self.progress.emit("[PCB] 응답하는 포트를 찾지 못했습니다.")
+
+        candidates = [p for p in ports if p != pcb_port]
+        knob_port: Optional[str] = None
+        if candidates:
+            self.progress.emit(
+                f"노브 응답 포트 검색 중... 스캔하는 동안 볼륨 노브를 좌우로 계속 돌려주세요. "
+                f"(포트당 최대 약 {self._knob_listen:.0f}초)"
+            )
+            for p in candidates:
+                self.progress.emit(f"[노브] {p} 청취 중... (지금 노브를 돌리세요)")
+                if _detect_knob_on_port(
+                    p, self._knob_baud, listen_seconds=self._knob_listen, emit=self.progress.emit
+                ):
+                    knob_port = p
+                    self.progress.emit(f"[노브] U/D 신호 확인 → {p}")
+                    break
+            if not knob_port:
+                self.progress.emit(
+                    "[노브] U/D 신호를 받은 포트가 없습니다. (스캔 중 노브를 돌렸는지 확인)"
+                )
+
+        self.result.emit(pcb_port, knob_port)
+
 
 # ─── 카푸친 모카 컬러셋 ───
 CTP_MOCHA = {
@@ -269,6 +462,7 @@ class KioskApp(QMainWindow):
         self.setMinimumSize(360, 520)
 
         self._webview_proc: Optional[subprocess.Popen] = None
+        self._scan_worker: Optional[PortScanWorker] = None
         self._webview_poll = QTimer(self)
         self._webview_poll.timeout.connect(self._poll_webview_process)
         # WebView 비정상 종료 시 자동 재시작용 상태
@@ -336,12 +530,21 @@ class KioskApp(QMainWindow):
             "키워드가 비어 있으면 모든 시리얼 포트를, 있으면 설명에 키워드가 들어간 포트만 드롭다운에 채웁니다."
         )
         port_row.addWidget(self.refresh_ports_btn)
+        self.scan_ports_btn = QPushButton("PCB·노브 자동 찾기")
+        self.scan_ports_btn.setObjectName("SecondaryBtn")
+        self.scan_ports_btn.setToolTip(
+            "감지된 모든 COM 포트에 PCB 상태 요청을 보내 응답하는 포트를 찾고,\n"
+            "이어서 노브를 돌리는 동안 U/D 신호를 보내는 포트를 찾아 자동으로 선택합니다.\n"
+            "실행(연결) 중에는 포트가 사용 중이라 스캔할 수 없습니다."
+        )
+        port_row.addWidget(self.scan_ports_btn)
         serial_outer.addLayout(port_row)
 
         kw_row = QHBoxLayout()
-        kw_row.addWidget(QLabel("포트 설명 필터 (비우면 전체):"))
+        kw_row.addWidget(QLabel("포트 설명 필터:"))
         self.keyword_edit = QLineEdit()
-        self.keyword_edit.setPlaceholderText("예: USB, CP210, CH340 — 비우면 전체 목록")
+        self.keyword_edit.setReadOnly(True)
+        self.keyword_edit.setToolTip("포트 자동 검색 키워드는 USB로 고정됩니다.")
         kw_row.addWidget(self.keyword_edit, stretch=1)
         serial_outer.addLayout(kw_row)
 
@@ -387,9 +590,6 @@ class KioskApp(QMainWindow):
         self.websocket_addr_edit = QLineEdit()
         env_form.addRow("WEBSOCKET_ADDR:", self.websocket_addr_edit)
 
-        self.ws_enabled_cb = QCheckBox("WS_ENABLED")
-        env_form.addRow(self.ws_enabled_cb)
-
         self.ws_reconnect_spin = _float_spin(5.0, 0.5, 600.0, 1.0)
         env_form.addRow("WS_RECONNECT_INTERVAL:", self.ws_reconnect_spin)
 
@@ -414,9 +614,6 @@ class KioskApp(QMainWindow):
         volume_box = QGroupBox("볼륨 노브 시리얼")
         volume_form = QFormLayout(volume_box)
         _configure_form_layout(volume_form)
-
-        self.volume_enabled_cb = QCheckBox("VOLUME_SERIAL_ENABLED")
-        volume_form.addRow(self.volume_enabled_cb)
 
         volume_port_widget = QWidget()
         volume_port_layout = QHBoxLayout(volume_port_widget)
@@ -447,9 +644,6 @@ class KioskApp(QMainWindow):
 
         self.webview_devtools_cb = QCheckBox("WEBVIEW_DEVTOOLS")
         webview_form.addRow(self.webview_devtools_cb)
-
-        self.webview_tray_cb = QCheckBox("WEBVIEW_TRAY_ENABLED")
-        webview_form.addRow(self.webview_tray_cb)
 
         form_root.addWidget(webview_box)
 
@@ -517,6 +711,7 @@ class KioskApp(QMainWindow):
         self.setStyleSheet(QSS)
 
         self.refresh_ports_btn.clicked.connect(lambda *_: self._populate_ports())
+        self.scan_ports_btn.clicked.connect(lambda *_: self._on_scan_ports())
         self.refresh_volume_ports_btn.clicked.connect(
             lambda *_: self._populate_volume_ports()
         )
@@ -546,19 +741,16 @@ class KioskApp(QMainWindow):
             float(os.getenv("DEVICE_API_TIMEOUT", "10.0"))
         )
         self.websocket_addr_edit.setText(config.websocket_addr)
-        self.ws_enabled_cb.setChecked(config.ws_enabled)
         self.ws_reconnect_spin.setValue(float(config.ws_reconnect_interval))
         self.status_poll_spin.setValue(
             float(os.getenv("STATUS_POLL_INTERVAL", "600"))
         )
         self.webview_enabled_cb.setChecked(config.webview_enabled)
         self.webview_devtools_cb.setChecked(config.webview_devtools)
-        self.webview_tray_cb.setChecked(config.webview_tray_enabled)
         self.vacant_idle_spin.setValue(float(config.vacant_idle_close_seconds))
         self.browser_timeout_spin.setValue(
             int(config.background_browser_timeout_seconds)
         )
-        self.volume_enabled_cb.setChecked(bool(config.volume_serial_enabled))
         self._populate_volume_ports(select_device=config.volume_serial_port)
         lv = (config.log_level or "INFO").strip().upper()
         idx = self.log_level_combo.findText(lv, Qt.MatchFixedString)
@@ -590,21 +782,20 @@ class KioskApp(QMainWindow):
         else:
             config.serial_port = self._resolved_port()
         config.serial_baudrate = 115200
-        config.serial_port_description_keyword = self.keyword_edit.text().strip()
-        config.ws_enabled = self.ws_enabled_cb.isChecked()
+        config.serial_port_description_keyword = "USB"
+        config.ws_enabled = True
         config.ws_reconnect_interval = float(self.ws_reconnect_spin.value())
         config.webview_enabled = self.webview_enabled_cb.isChecked()
         config.webview_ws_url = config.websocket_addr
-        config.webview_ws_kiosk_id = config.kiosk_id
         config.webview_devtools = self.webview_devtools_cb.isChecked()
-        config.webview_tray_enabled = self.webview_tray_cb.isChecked()
+        config.webview_tray_enabled = True
         config.vacant_idle_close_seconds = float(self.vacant_idle_spin.value())
         config.input_monitor_enabled = True
         config.kiosk_browser_cmd = ""
         config.background_browser_timeout_seconds = float(
             self.browser_timeout_spin.value()
         )
-        config.volume_serial_enabled = self.volume_enabled_cb.isChecked()
+        config.volume_serial_enabled = config.asset_device_type == "KIOSK"
         config.volume_serial_port = self._resolved_volume_port()
         config.volume_serial_baudrate = 38400
         config.volume_up_hex_codes = frozenset()
@@ -695,6 +886,78 @@ class KioskApp(QMainWindow):
                 return
         self.port_combo.setEditText(device)
 
+    def _on_scan_ports(self) -> None:
+        """모든 COM 포트를 스캔해 PCB·노브 포트를 백그라운드 스레드에서 찾는다."""
+        if self._is_session_active():
+            QMessageBox.information(
+                self,
+                "PCB·노브 자동 찾기",
+                "실행 중에는 COM 포트가 사용 중이라 스캔할 수 없습니다.\n"
+                "먼저 중지(연결 해제)한 뒤 다시 시도하세요.",
+            )
+            return
+        if self._scan_worker is not None and self._scan_worker.isRunning():
+            return
+
+        pcb_baud = int(config.serial_baudrate or 115200)
+        knob_baud = int(config.volume_serial_baudrate or 38400)
+
+        self._append_log("[INFO] ---- PCB·노브 포트 자동 찾기 시작 ----")
+        self._append_log(
+            f"[INFO] PCB {pcb_baud}bps · 노브 {knob_baud}bps 로 스캔합니다. "
+            "노브 검색 단계에서는 볼륨 노브를 좌우로 돌려주세요."
+        )
+        self._set_scanning_ui(True)
+
+        worker = PortScanWorker(pcb_baud, knob_baud)
+        worker.progress.connect(lambda m: self._append_log(f"[SCAN] {m}"))
+        worker.result.connect(self._on_scan_finished)
+        worker.finished.connect(lambda: self._set_scanning_ui(False))
+        self._scan_worker = worker
+        worker.start()
+
+    def _on_scan_finished(self, pcb_port: Optional[str], knob_port: Optional[str]) -> None:
+        if pcb_port:
+            self._populate_ports(select_device=pcb_port)
+            self._append_log(f"[INFO] PCB 포트 자동 선택 → {pcb_port}")
+        else:
+            self._append_log("[WARN] PCB 응답 포트를 찾지 못했습니다.")
+
+        if knob_port:
+            self._populate_volume_ports(select_device=knob_port)
+            self._append_log(
+                f"[INFO] 노브 포트 자동 선택 → {knob_port}"
+            )
+        else:
+            self._append_log(
+                "[INFO] 노브 포트는 찾지 못했습니다. (스캔 중 노브를 돌렸는지 / 연결을 확인)"
+            )
+
+        if pcb_port or knob_port:
+            QMessageBox.information(
+                self,
+                "PCB·노브 자동 찾기",
+                f"PCB 포트: {pcb_port or '미발견'}\n"
+                f"노브 포트: {knob_port or '미발견'}\n\n"
+                "필요하면 '연결'을 눌러 적용하세요.",
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "PCB·노브 자동 찾기",
+                "PCB·노브 응답 포트를 찾지 못했습니다.\n"
+                "케이블·전원, 그리고 스캔 중 노브를 돌렸는지 확인하세요.",
+            )
+
+    def _set_scanning_ui(self, scanning: bool) -> None:
+        self.scan_ports_btn.setEnabled(not scanning)
+        self.scan_ports_btn.setText("스캔 중..." if scanning else "PCB·노브 자동 찾기")
+        self.refresh_ports_btn.setEnabled(not scanning)
+        self.refresh_volume_ports_btn.setEnabled(not scanning)
+        self.connect_btn.setEnabled(not scanning)
+        self.port_combo.setEnabled(not scanning)
+        self.volume_port_combo.setEnabled(not scanning)
+
     def _resolved_port(self) -> str:
         dev = self.port_combo.currentData()
         if dev:
@@ -724,7 +987,7 @@ class KioskApp(QMainWindow):
             return "FAKE"
 
         raw = self._resolved_port()
-        kw = self.keyword_edit.text().strip() or "USB"
+        kw = config.serial_port_description_keyword or "USB"
         usb_vid = config.serial_usb_vid or None
         usb_pid = config.serial_usb_pid or None
         usb_serial = config.serial_usb_serial or None
@@ -805,10 +1068,10 @@ class KioskApp(QMainWindow):
         self.connect_btn.setEnabled(not enabled)
         self.disconnect_btn.setEnabled(enabled)
         self.refresh_ports_btn.setEnabled(not enabled)
+        self.scan_ports_btn.setEnabled(not enabled)
         self.refresh_volume_ports_btn.setEnabled(not enabled)
         self.keyword_edit.setEnabled(not enabled)
         self.port_combo.setEnabled(not enabled)
-        self.volume_enabled_cb.setEnabled(not enabled)
         self.volume_port_combo.setEnabled(not enabled)
 
     def _is_session_active(self) -> bool:
@@ -834,6 +1097,8 @@ class KioskApp(QMainWindow):
 
         cmd = _main_subprocess_cmd()
         child_env = os.environ.copy()
+        for key in DEPRECATED_GUI_ENV_KEYS:
+            child_env.pop(key, None)
         child_env.update({key: value for key, value in self._env_pairs()})
         try:
             self._webview_proc = subprocess.Popen(cmd, env=child_env)
@@ -918,8 +1183,8 @@ class KioskApp(QMainWindow):
                 QMessageBox.warning(
                     self,
                     "볼륨 노브 포트",
-                    "VOLUME_SERIAL_ENABLED 가 켜져 있지만 볼륨 노브 포트가 비어 있습니다.\n"
-                    "볼륨 노브용 COM 포트를 선택하거나 기능을 꺼 주세요.",
+                    "키오스크 모드에서는 볼륨 노브 시리얼이 항상 켜집니다.\n"
+                    "볼륨 노브용 COM 포트를 선택해 주세요.",
                 )
                 return
             serial_port = (config.serial_port or "").strip()
@@ -953,22 +1218,10 @@ class KioskApp(QMainWindow):
             ("DEVICE_API_TIMEOUT", f"{float(self.device_api_timeout_spin.value()):g}"),
             ("WEBSOCKET_ADDR", config.websocket_addr or ""),
             ("SERIAL_PORT", config.serial_port or ""),
-            ("SERIAL_BAUDRATE", str(int(config.serial_baudrate))),
-            ("SERIAL_PORT_DESCRIPTION_KEYWORD", config.serial_port_description_keyword or ""),
-            (
-                "VOLUME_SERIAL_ENABLED",
-                "true" if config.volume_serial_enabled else "false",
-            ),
             ("VOLUME_SERIAL_PORT", config.volume_serial_port or ""),
-            ("VOLUME_BAUDRATE", str(int(config.volume_serial_baudrate))),
-            ("WS_ENABLED", "true" if config.ws_enabled else "false"),
             ("WS_RECONNECT_INTERVAL", f"{float(config.ws_reconnect_interval):g}"),
             ("WEBVIEW_ENABLED", "true" if config.webview_enabled else "false"),
             ("WEBVIEW_DEVTOOLS", "true" if config.webview_devtools else "false"),
-            (
-                "WEBVIEW_TRAY_ENABLED",
-                "true" if config.webview_tray_enabled else "false",
-            ),
             ("VACANT_IDLE_CLOSE_SECONDS", f"{float(config.vacant_idle_close_seconds):g}"),
             ("INPUT_MONITOR_ENABLED", "true" if config.input_monitor_enabled else "false"),
             ("STATUS_POLL_INTERVAL", f"{float(self.status_poll_spin.value()):g}"),
@@ -989,41 +1242,7 @@ class KioskApp(QMainWindow):
 
         existing = dotenv_values(env_path) if env_path.is_file() else {}
         # 화면에서 제거한 예전 GUI 키는 저장 시 .env에서도 지운다.
-        deprecated_gui_keys = {
-            "KIOSK_ID",
-            "KIOSK_BROWSER_CMD",
-            "WEBVIEW_WS_KIOSK_ID",
-            "WEBVIEW_WS_URL",
-            "WS_URL",
-            "WEBVIEW_WS_RECONNECT_INTERVAL",
-            "WEBVIEW_SCREENSHOT_INTERVAL",
-            "WEBVIEW_ERROR_REFRESH_INTERVAL",
-            "WEBVIEW_NETWORK_PROBE_TIMEOUT",
-            "AUTO_OPEN_DOOR_ON_PERSON",
-            "DEFAULT_ASSET_API_BASE_URL",
-            "ASSET_API_TOKEN",
-            "ASSET_API_TIMEOUT",
-            "ASSET_NEARBY_RADIUS",
-            "ASSET_NEARBY_COUNT",
-            "ASSET_NEARBY_TYPE",
-            "NEARBY_ASSET_CACHE_PATH",
-            "NEARBY_ASSET_REFRESH_INTERVAL",
-            "CURRENT_LATITUDE",
-            "CURRENT_LONGITUDE",
-            "MEET_WEB_URL",
-            "PERSON_DETECTED_MP3_PATH",
-            "PERSON_DETECTED_TTS_TEXT",
-            "PERSON_DETECTED_TTS_LANG",
-            "PERSON_DETECTED_TTS_AUTOGEN",
-            "tts_text",
-            "tts_text2",
-            "VOLUME_SERIAL_BAUDRATE",
-            "VOLUME_SERIAL_TIMEOUT",
-            "VOLUME_UP_HEX_CODES",
-            "VOLUME_DOWN_HEX_CODES",
-            "TEST_MODE_ENABLED",
-        }
-        gui_keys = {k for k, _ in pairs} | deprecated_gui_keys
+        gui_keys = {k for k, _ in pairs} | DEPRECATED_GUI_ENV_KEYS
         merged: list[tuple[str, str]] = []
         for k, v in existing.items():
             if k in gui_keys:

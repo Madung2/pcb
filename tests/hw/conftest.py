@@ -41,7 +41,7 @@ def pytest_addoption(parser):
         action="store",
         default=None,
         type=int,
-        help="보드레이트 (기본 115200 또는 SERIAL_BAUDRATE)",
+        help="보드레이트 (기본 115200)",
     )
     parser.addoption(
         "--dim-level",
@@ -63,7 +63,7 @@ def _resolve_baud(config) -> int:
     cli = config.getoption("--baud")
     if cli:
         return int(cli)
-    return int(os.getenv("SERIAL_BAUDRATE", "115200"))
+    return 115200
 
 
 def _resolve_dim_level(config) -> int:

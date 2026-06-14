@@ -90,8 +90,6 @@ def load_serial_defaults() -> dict[str, str]:
         values.update(parse_env_file(path))
     for key in (
         "SERIAL_PORT",
-        "SERIAL_BAUDRATE",
-        "SERIAL_PORT_DESCRIPTION_KEYWORD",
         "SERIAL_USB_VID",
         "SERIAL_USB_PID",
         "SERIAL_USB_SERIAL",
@@ -276,7 +274,7 @@ def resolve_port(args: argparse.Namespace, env: dict[str, str], rows: list[objec
     if raw_port.strip().upper() != "AUTO":
         return raw_port.strip(), ".env SERIAL_PORT"
 
-    keyword = args.keyword or env.get("SERIAL_PORT_DESCRIPTION_KEYWORD") or "USB"
+    keyword = args.keyword or "USB"
     keyword_port = find_port_by_keyword(rows, keyword)
     if keyword_port:
         return keyword_port, f"keyword match {keyword!r}"
@@ -437,7 +435,7 @@ def run_check(args: argparse.Namespace, logger: TeeLogger) -> int:
     else:
         logger.line("No serial ports detected.")
 
-    baudrate = int(args.baudrate or env.get("SERIAL_BAUDRATE") or DEFAULT_BAUDRATE)
+    baudrate = int(args.baudrate or DEFAULT_BAUDRATE)
     timeout = float(args.timeout)
     scan_all = bool(args.scan_all or not args.port or (args.port or "").strip().upper() == "AUTO")
     attempts = int(args.attempts if args.attempts is not None else (2 if scan_all else DEFAULT_ATTEMPTS))

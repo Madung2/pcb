@@ -114,13 +114,13 @@ def create_ws_bridge(
         )
         return None
 
-    device_id = (config.device_id or config.kiosk_id or "").strip()
+    device_id = (config.device_id or "").strip()
     if device_id:
         ws_url = _append_device_id_query(ws_url, device_id)
     else:
         logger.warning(
-            "WSBridge: kiosk_id(=자산 UUID) 가 비어 있어 device_id 쿼리를 붙이지 못했습니다. "
-            "DEVICE_ID 또는 KIOSK_ID 환경변수를 설정하세요."
+            "WSBridge: DEVICE_ID 가 비어 있어 device_id 쿼리를 붙이지 못했습니다. "
+            "DEVICE_ID 환경변수를 설정하세요."
         )
 
     logger.info("WSBridge 연결 URL(엔드포인트/캐시 우선): %s", ws_url)

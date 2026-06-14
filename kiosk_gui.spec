@@ -78,6 +78,8 @@ hiddenimports = [
     "pyproj",
     "geocoder",
     "webview",
+    # GUI의 'PCB·노브 자동 찾기' 버튼이 import 하는 스캔 헬퍼
+    "pcb_connection_check",
 ]
 
 

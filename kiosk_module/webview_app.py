@@ -14,8 +14,8 @@ from .webview_services import (
     KioskInfo,
     PcbWorkerThread,
     WebViewWebSocketService,
-    append_kiosk_id,
-    resolve_webview_kiosk_id,
+    append_device_id_query,
+    resolve_webview_device_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -381,8 +381,8 @@ class WebViewUI:
 class IntegratedWebViewApp(WebViewUI):
     def __init__(self, serial_port: str, serial_baudrate: int) -> None:
         super().__init__()
-        kiosk_id = resolve_webview_kiosk_id(config)
-        self.kiosk_info = KioskInfo(kiosk_id=kiosk_id)
+        device_id = resolve_webview_device_id(config)
+        self.kiosk_info = KioskInfo(device_id=device_id)
         self._serial_port = serial_port
         self._serial_baudrate = serial_baudrate
         self._shutdown_lock = threading.Lock()
@@ -409,7 +409,10 @@ class IntegratedWebViewApp(WebViewUI):
     def start_services(self) -> None:
         initial_url = (config.base_url or config.default_url or "").strip()
         if initial_url:
-            self.default_screen_url = append_kiosk_id(initial_url, self.kiosk_info.kiosk_id)
+            self.default_screen_url = append_device_id_query(
+                initial_url,
+                self.kiosk_info.device_id,
+            )
             self.navigate_to(self.default_screen_url)
 
         if config.webview_ws_url:
@@ -502,16 +505,16 @@ class IntegratedWebViewApp(WebViewUI):
         screen_url: str | None = None,
     ) -> None:
         self.kiosk_info = KioskInfo(
-            kiosk_id=self.kiosk_info.kiosk_id,
+            device_id=self.kiosk_info.device_id,
             name=name,
             latitude=latitude,
             longitude=longitude,
             screen_url=screen_url,
         )
         if screen_url:
-            self.default_screen_url = append_kiosk_id(
+            self.default_screen_url = append_device_id_query(
                 screen_url,
-                self.kiosk_info.kiosk_id,
+                self.kiosk_info.device_id,
             )
             self.navigate_to(self.default_screen_url)
 
@@ -563,10 +566,10 @@ class IntegratedWebViewApp(WebViewUI):
 
     def run(self) -> int:
         self.logger.info(
-            "IntegratedWebViewApp.run() 시작 serial=%r baud=%s kiosk_id=%s",
+            "IntegratedWebViewApp.run() 시작 serial=%r baud=%s device_id=%s",
             self._serial_port,
             self._serial_baudrate,
-            self.kiosk_info.kiosk_id,
+            self.kiosk_info.device_id,
         )
         self._webview_runtime_ready = False
         self._pending_nav_url = None

@@ -43,6 +43,9 @@ from kiosk_module.protocol import ButtonPressEvent
 ROOT = Path(__file__).resolve().parents[1]
 ENV_KIOSK = ROOT / ".env_kiosk"
 WEBVIEW_STARTUP_SECONDS = 5.0
+STATIC_SERIAL_BAUDRATE = 115200
+STATIC_SERIAL_PORT_DESCRIPTION_KEYWORD = "USB"
+STATIC_VOLUME_BAUDRATE = 38400
 
 
 def _read_env_file(path: Path = ENV_KIOSK) -> dict[str, str]:
@@ -71,19 +74,19 @@ def _apply_env_to_main_config(monkeypatch, env: dict[str, str]) -> None:
     monkeypatch.setattr(cfg, "default_url", env["DEFAULT_URL"])
     monkeypatch.setattr(cfg, "websocket_addr", env["WEBSOCKET_ADDR"])
     monkeypatch.setattr(cfg, "serial_port", env["SERIAL_PORT"])
-    monkeypatch.setattr(cfg, "serial_baudrate", int(env["SERIAL_BAUDRATE"]))
+    monkeypatch.setattr(cfg, "serial_baudrate", STATIC_SERIAL_BAUDRATE)
     monkeypatch.setattr(
         cfg,
         "serial_port_description_keyword",
-        env["SERIAL_PORT_DESCRIPTION_KEYWORD"],
+        STATIC_SERIAL_PORT_DESCRIPTION_KEYWORD,
     )
     monkeypatch.setattr(
         cfg,
         "volume_serial_enabled",
-        _env_bool(env["VOLUME_SERIAL_ENABLED"]),
+        env["ASSET_DEVICE_TYPE"] == "KIOSK",
     )
     monkeypatch.setattr(cfg, "volume_serial_port", env["VOLUME_SERIAL_PORT"])
-    monkeypatch.setattr(cfg, "volume_serial_baudrate", int(env["VOLUME_BAUDRATE"]))
+    monkeypatch.setattr(cfg, "volume_serial_baudrate", STATIC_VOLUME_BAUDRATE)
     monkeypatch.setattr(cfg, "webview_enabled", _env_bool(env["WEBVIEW_ENABLED"]))
     monkeypatch.setattr(
         cfg,
@@ -138,7 +141,6 @@ def test_env_kiosk_starts_kiosk_screen_and_run_kiosk_worker(monkeypatch) -> None
     env = _read_env_file()
     assert env["ASSET_DEVICE_TYPE"] == "KIOSK"
     assert env["SERIAL_PORT"] == "COM4"
-    assert env["VOLUME_SERIAL_ENABLED"] == "true"
     assert env["VOLUME_SERIAL_PORT"] == "COM3"
 
     _apply_env_to_main_config(monkeypatch, env)
@@ -186,16 +188,43 @@ def test_env_kiosk_starts_kiosk_screen_and_run_kiosk_worker(monkeypatch) -> None
     assert result == 0
     assert calls["ws_device_id"] == env["DEVICE_ID"]
     assert calls["kiosk_display_url"] == expected_url
-    assert calls["run_kiosk"] == (env["SERIAL_PORT"], int(env["SERIAL_BAUDRATE"]))
+    assert calls["run_kiosk"] == (env["SERIAL_PORT"], STATIC_SERIAL_BAUDRATE)
     assert "kiosk-events-worker" in calls["thread_names"]
 
 
-def test_env_kiosk_real_base_url_opens_real_meetone_chromium(monkeypatch) -> None:
+def test_hidden_meetone_flow(monkeypatch) -> None:
     env = _read_env_file()
     assert env["ASSET_DEVICE_TYPE"] == "KIOSK"
     assert env["WEBVIEW_ENABLED"] == "false"
 
     _apply_env_to_main_config(monkeypatch, env)
+
+    foreground_calls: list[tuple] = []
+    background_calls: list[tuple] = []
+
+    def _fail_if_foreground(*args, **kwargs) -> None:
+        foreground_calls.append((args, kwargs))
+        raise AssertionError(
+            "launch_foreground_browser 는 호출되면 안 됩니다. "
+            "MeetOne은 백그라운드로만 실행되어야 합니다."
+        )
+
+    real_launch_background = browser_mod.launch_background_browser
+
+    def _track_background_launch(*args, **kwargs) -> None:
+        background_calls.append((args, kwargs))
+        return real_launch_background(*args, **kwargs)
+
+    monkeypatch.setattr(
+        browser_mod,
+        "launch_foreground_browser",
+        _fail_if_foreground,
+    )
+    monkeypatch.setattr(
+        kiosk_events_mod,
+        "launch_background_browser",
+        _track_background_launch,
+    )
 
     base_url = env_utils_mod.resolve_device_urls(env["DEVICE_ID"])
     assert base_url
@@ -225,6 +254,10 @@ def test_env_kiosk_real_base_url_opens_real_meetone_chromium(monkeypatch) -> Non
             )
         )
 
+        assert len(background_calls) == 1, "백그라운드 MeetOne 실행이 1회 호출되어야 합니다."
+        assert foreground_calls == [], "전면 MeetOne 실행은 호출되면 안 됩니다."
+        assert background_calls[0][0][0] == meet_url
+
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
             with browser_mod._SESSION_LOCK:
@@ -235,14 +268,18 @@ def test_env_kiosk_real_base_url_opens_real_meetone_chromium(monkeypatch) -> Non
         with browser_mod._SESSION_LOCK:
             session = browser_mod._sessions.get(SESSION_MEET_WEB)
 
-        assert session is not None, "MeetOne 브라우저 세션이 생성되지 않았습니다."
+        assert session is not None, "MeetOne 백그라운드 브라우저 세션이 생성되지 않았습니다."
         proc, timer = session
         assert proc is not None
         assert proc.poll() is None
         assert timer is not None
+        assert webview_proc.poll() is None, (
+            "MeetOne 실행 후에도 키오스크 WebView 프로세스가 살아 있어야 합니다."
+        )
 
-        # 눈으로 확인할 시간을 준다: 키오스크 WebView가 떠 있고, MeetOne Chrome도 함께 떠 있어야 한다.
+        # 눈으로 확인: 키오스크 WebView가 계속 보이고 MeetOne은 백그라운드로만 떠 있어야 한다.
         time.sleep(10.0)
+        assert webview_proc.poll() is None
     finally:
         browser_mod.shutdown_background_browser(SESSION_MEET_WEB)
         if webview_proc.poll() is None:

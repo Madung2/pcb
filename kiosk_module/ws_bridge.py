@@ -164,7 +164,7 @@ class WSBridge:
 
         await self.send({
             "type": "status",
-            "device_id": config.device_id or config.kiosk_id,
+            "device_id": config.device_id,
             "data": status_dict,
         })
 

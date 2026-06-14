@@ -116,7 +116,7 @@ async def run_kiosk(
         volume_port = (config.volume_serial_port or "").strip()
         if not volume_port:
             logger.warning(
-                "볼륨 노브 시리얼 비활성화: VOLUME_SERIAL_ENABLED=true 이지만 "
+                "볼륨 노브 시리얼 비활성화: 키오스크 모드에서는 항상 사용하지만 "
                 "VOLUME_SERIAL_PORT 가 비어 있습니다."
             )
         elif volume_port.upper() == str(serial_port).strip().upper():
@@ -150,7 +150,7 @@ async def run_kiosk(
                 config.volume_serial_baudrate,
             )
     else:
-        logger.info("볼륨 노브 시리얼 비활성화: VOLUME_SERIAL_ENABLED=false")
+        logger.info("볼륨 노브 시리얼 비활성화: ASSET_DEVICE_TYPE=%s", config.asset_device_type)
 
     test_input_task: asyncio.Task | None = None
     from .test_input_ipc import (

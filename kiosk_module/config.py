@@ -18,7 +18,6 @@ _PROJECT_ROOT = user_data_root()
 load_dotenv(ensure_user_env())
 
 DEFAULT_SERIAL_BAUDRATE = 115200
-DEFAULT_WS_ENABLED = True
 DEFAULT_INPUT_MONITOR_ENABLED = True
 DEFAULT_KIOSK_BROWSER_CMD = ""
 DEFAULT_VOLUME_BAUDRATE = 38400
@@ -35,11 +34,11 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def _webview_ws_url_from_env() -> str:
-    """부팅 시 한 번: ``WEBVIEW_WS_URL`` → 레거시 ``WS_URL`` → ``WEBSOCKET_ADDR``."""
+    """부팅 시 한 번: ``WEBSOCKET_ADDR`` → 레거시 ``WEBVIEW_WS_URL``/``WS_URL``."""
     return (
-        os.getenv("WEBVIEW_WS_URL")
+        os.getenv("WEBSOCKET_ADDR")
+        or os.getenv("WEBVIEW_WS_URL")
         or os.getenv("WS_URL")
-        or os.getenv("WEBSOCKET_ADDR")
         or ""
     ).strip()
 
@@ -48,19 +47,14 @@ def _webview_ws_url_from_env() -> str:
 class Config:
     """모듈 설정."""
 
-    # 시리얼 포트 (빈 값 또는 AUTO이면 ``SERIAL_PORT_DESCRIPTION_KEYWORD``로 자동 검색)
+    # 시리얼 포트 (빈 값 또는 AUTO이면 고정 키워드 "USB"로 자동 검색)
     serial_port: str = os.getenv("SERIAL_PORT", "COM3")
-    serial_baudrate: int = int(os.getenv("SERIAL_BAUDRATE", str(DEFAULT_SERIAL_BAUDRATE)))
-    serial_port_description_keyword: str = os.getenv(
-        "SERIAL_PORT_DESCRIPTION_KEYWORD", "USB"
-    )
+    serial_baudrate: int = DEFAULT_SERIAL_BAUDRATE
+    serial_port_description_keyword: str = "USB"
     # USB 장치 식별 (리부트 후 COM 번호가 바뀌어도 동일 장치를 찾을 때 사용)
     serial_usb_vid: str = (os.getenv("SERIAL_USB_VID", "") or "").strip()
     serial_usb_pid: str = (os.getenv("SERIAL_USB_PID", "") or "").strip()
     serial_usb_serial: str = (os.getenv("SERIAL_USB_SERIAL", "") or "").strip()
-
-    # 백엔드에서 키오스크 구분 (예: WS 이벤트 ``PERSON_DETECTED`` 페이로드)
-    kiosk_id: str = (os.getenv("KIOSK_ID", "") or "").strip()
 
     # ysoh 2026-06-13: 장치 타입 (KIOSK / SMART_POLE / POLE_N_ED) 및 장치 UUID
     asset_device_type: str = (os.getenv("ASSET_DEVICE_TYPE", "") or "KIOSK").strip().upper()
@@ -73,7 +67,7 @@ class Config:
     websocket_addr: str = (os.getenv("WEBSOCKET_ADDR", "") or "").strip()
 
     # WebSocket 브릿지 + 웹뷰 WS: 모두 ``webview_ws_url`` 하나.
-    ws_enabled: bool = _env_bool("WS_ENABLED", default=DEFAULT_WS_ENABLED)
+    ws_enabled: bool = True
     ws_reconnect_interval: float = float(
         os.getenv("WS_RECONNECT_INTERVAL", "5.0")
     )
@@ -82,11 +76,8 @@ class Config:
     # ysoh 2026-06-13
     webview_enabled: bool = _env_bool("WEBVIEW_ENABLED", default=True)
     webview_ws_url: str = field(default_factory=_webview_ws_url_from_env)
-    webview_ws_kiosk_id: str = (os.getenv("KIOSK_ID", "") or "").strip()
     webview_devtools: bool = _env_bool("WEBVIEW_DEVTOOLS", default=False)
-    webview_tray_enabled: bool = _env_bool(
-        "WEBVIEW_TRAY_ENABLED", default=True
-    )
+    webview_tray_enabled: bool = True
 
     # 사람 없음 + 입력 유휴 시 자동 도어 닫기 (초).
     # 전제: pynput이 동작해야 유휴 시간이 증가함(기본 20초).
@@ -109,11 +100,9 @@ class Config:
 
     # Windows: 별도 시리얼(COM)에서 U/D 문자로 OS 마스터 볼륨 업/다운
     # (PCB 제어용 SERIAL_PORT 와 별도: VOLUME_SERIAL_PORT)
-    volume_serial_enabled: bool = _env_bool("VOLUME_SERIAL_ENABLED", default=False)
+    volume_serial_enabled: bool = asset_device_type == "KIOSK"
     volume_serial_port: str = (os.getenv("VOLUME_SERIAL_PORT", "COM5") or "COM5").strip()
-    volume_serial_baudrate: int = int(
-        os.getenv("VOLUME_BAUDRATE", str(DEFAULT_VOLUME_BAUDRATE))
-    )
+    volume_serial_baudrate: int = DEFAULT_VOLUME_BAUDRATE
     volume_serial_timeout: float = float(os.getenv("VOLUME_SERIAL_TIMEOUT", "0.2"))
     # 비우면 U/D 문자만 처리. 바이너리 장치는 VOLUME_*_HEX_CODES 로 추가
     volume_up_hex_codes: frozenset[str] = field(
@@ -142,7 +131,7 @@ class Config:
     def __repr__(self):
         return (
             f"Config(\n"
-            f"  kiosk_id={self.kiosk_id!r},\n"
+            f"  device_id={self.device_id!r},\n"
             f"  asset_device_type={self.asset_device_type!r},\n"
             f"  serial={self.serial_port}@{self.serial_baudrate}, "
             f"port_kw={self.serial_port_description_keyword!r},\n"

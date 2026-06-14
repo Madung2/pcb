@@ -5,7 +5,7 @@ import kiosk_module.kiosk_events as kiosk_events_mod
 from kiosk_module.kiosk_events import KioskMonitorHandlers
 from kiosk_module.protocol import ButtonPressEvent, StatusResponse
 from kiosk_module.status_monitor import StatusMonitor
-from kiosk_module.webview_services import append_kiosk_id
+from kiosk_module.webview_services import append_device_id_query
 
 
 class _FakeController:
@@ -58,10 +58,10 @@ class TestWebViewIntegration(unittest.TestCase):
             button_right_status=right_button,
         )
 
-    @patch.object(kiosk_events_mod, "launch_foreground_browser")
+    @patch.object(kiosk_events_mod, "launch_background_browser")
     def test_right_button_shows_meet_in_integrated_webview(
         self,
-        mock_launch_foreground: MagicMock,
+        mock_launch_background: MagicMock,
     ) -> None:
         webview_controller = _FakeWebViewController()
         handlers = KioskMonitorHandlers(
@@ -83,13 +83,13 @@ class TestWebViewIntegration(unittest.TestCase):
                     right_just_pressed=True,
                 )
             )
-        mock_launch_foreground.assert_not_called()
+        mock_launch_background.assert_not_called()
         self.assertEqual(webview_controller.show_meet_web_calls, 1)
 
-    @patch.object(kiosk_events_mod, "launch_foreground_browser")
+    @patch.object(kiosk_events_mod, "launch_background_browser")
     def test_first_status_person_and_right_button_still_opens_meet(
         self,
-        mock_launch_foreground: MagicMock,
+        mock_launch_background: MagicMock,
     ) -> None:
         monitor = StatusMonitor(MagicMock())
         webview_controller = _FakeWebViewController()
@@ -111,13 +111,13 @@ class TestWebViewIntegration(unittest.TestCase):
                 self._make_status(person_detected=1, right_button=1)
             )
 
-        mock_launch_foreground.assert_not_called()
+        mock_launch_background.assert_not_called()
         self.assertEqual(webview_controller.show_meet_web_calls, 1)
 
-    @patch.object(kiosk_events_mod, "launch_foreground_browser")
+    @patch.object(kiosk_events_mod, "launch_background_browser")
     def test_repeated_right_button_status_opens_meet_each_time(
         self,
-        mock_launch_foreground: MagicMock,
+        mock_launch_background: MagicMock,
     ) -> None:
         monitor = StatusMonitor(MagicMock())
         webview_controller = _FakeWebViewController()
@@ -142,13 +142,13 @@ class TestWebViewIntegration(unittest.TestCase):
                 self._make_status(person_detected=0, right_button=1)
             )
 
-        mock_launch_foreground.assert_not_called()
+        mock_launch_background.assert_not_called()
         self.assertEqual(webview_controller.show_meet_web_calls, 2)
 
-    @patch.object(kiosk_events_mod, "launch_foreground_browser")
-    def test_meet_falls_back_to_foreground_browser_without_webview(
+    @patch.object(kiosk_events_mod, "launch_background_browser")
+    def test_meet_falls_back_to_background_browser_without_webview(
         self,
-        mock_launch_foreground: MagicMock,
+        mock_launch_background: MagicMock,
     ) -> None:
         handlers = KioskMonitorHandlers(
             _FakeController(),
@@ -168,7 +168,7 @@ class TestWebViewIntegration(unittest.TestCase):
                     right_just_pressed=True,
                 )
             )
-        mock_launch_foreground.assert_called_once()
+        mock_launch_background.assert_called_once()
 
     def test_absence_does_not_restore_webview_or_kill_meet(self) -> None:
         """사람 없음 폴링만으로는 내장 웹뷰 복귀·Meet 백그라운드 종료를 하지 않음."""
@@ -187,16 +187,16 @@ class TestWebViewIntegration(unittest.TestCase):
         self.assertEqual(webview_controller.restore_default_screen_calls, 0)
 
 
-class TestAppendKioskId(unittest.TestCase):
+class TestAppendDeviceId(unittest.TestCase):
     def test_skips_when_device_id_present(self) -> None:
         uid = "dde95ec2-9236-4dfd-aa4e-2fdd8206b22e"
         base = f"https://kiosk.jdone.co.kr/?device_id={uid}"
-        self.assertEqual(append_kiosk_id(base, uid), base)
+        self.assertEqual(append_device_id_query(base, uid), base)
 
     def test_appends_when_no_device_id(self) -> None:
         self.assertEqual(
-            append_kiosk_id("https://k.example.com/view", "K-1"),
-            "https://k.example.com/view?kiosk_id=K-1",
+            append_device_id_query("https://k.example.com/view", "device-1"),
+            "https://k.example.com/view?device_id=device-1",
         )
 
 

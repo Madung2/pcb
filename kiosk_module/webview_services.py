@@ -28,16 +28,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class KioskInfo:
-    kiosk_id: str
+    device_id: str
     name: str = "Unknown Kiosk"
     latitude: float | None = None
     longitude: float | None = None
     screen_url: str | None = None
 
 
-def resolve_webview_kiosk_id(cfg: Config) -> str:
-    kiosk_id = (cfg.webview_ws_kiosk_id or cfg.device_id or cfg.kiosk_id or "").strip()
-    return kiosk_id or "KIOSK-001"
+def resolve_webview_device_id(cfg: Config) -> str:
+    return (cfg.device_id or "").strip()
 
 
 def append_device_id_query(url: str, device_id: str) -> str:
@@ -63,33 +62,13 @@ def append_device_id_query(url: str, device_id: str) -> str:
     )
 
 
-def build_webview_ws_url(base_url: str, kiosk_id: str) -> str:
+def build_webview_ws_url(base_url: str, device_id: str) -> str:
     """웹뷰 WS URL 에 ``device_id=<asset.id>`` 쿼리를 채워 반환한다.
 
-    백엔드 `/ws/kiosk` 가 ``device_id`` 만 검증하므로 ``kiosk_id`` 인자(레거시 시그니처)는
-    ``device_id`` 와 동일한 자산 UUID 로 다룬다. 이미 쿼리에 ``device_id`` 가 있으면 값만 교체.
+    백엔드 `/ws/kiosk` 는 ``device_id`` 만 검증한다. 이미 쿼리에
+    ``device_id`` 가 있으면 값만 교체한다.
     """
-    return append_device_id_query(base_url, kiosk_id)
-
-
-def append_kiosk_id(url: str, kiosk_id: str) -> str:
-    """송출 URL에 ``kiosk_id`` 쿼리를 붙인다.
-
-    이미 ``device_id``/``deviceId`` 가 있으면 생략한다. 통합플랫폼·JDone 송출 URL이
-    ``?device_id=UUID`` 만 사용하는 경우 ``kiosk_id`` 를 덧붙이면 프론트가 깨질 수 있다.
-    """
-    kid = (kiosk_id or "").strip()
-    s = (url or "").strip()
-    if not kid or not s:
-        return s
-    parsed = urllib.parse.urlparse(s)
-    qsl = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-    for name, _ in qsl:
-        n = name.lower()
-        if n in ("device_id", "deviceid"):
-            return s
-    separator = "&" if "?" in s else "?"
-    return f"{s}{separator}kiosk_id={urllib.parse.quote(kid, safe='')}"
+    return append_device_id_query(base_url, device_id)
 
 
 def extract_meet_url(data: dict) -> str:
@@ -205,7 +184,7 @@ class WebViewWebSocketService(threading.Thread):
         self.websocket = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.reconnect_interval = WEBVIEW_WS_RECONNECT_DELAY_SECONDS
-        self.kiosk_id = resolve_webview_kiosk_id(cfg)
+        self.device_id = resolve_webview_device_id(cfg)
         self.logger = logging.getLogger("webview.ws")
 
     @property
@@ -221,7 +200,7 @@ class WebViewWebSocketService(threading.Thread):
             try:
                 ws_url = build_webview_ws_url(
                     self.config.webview_ws_url,
-                    self.kiosk_id,
+                    self.device_id,
                 )
                 self.logger.info("웹뷰 WS 연결 시도: %s", ws_url)
                 async with websockets.connect(ws_url) as websocket:
@@ -428,8 +407,7 @@ class WebViewWebSocketService(threading.Thread):
             return
         payload = {
             "type": "get_meet_url",
-            "device_id": self.config.device_id or self.kiosk_id,
-            "kiosk_id": self.kiosk_id,
+            "device_id": self.device_id,
             "timestamp": int(time.time()),
         }
         try:
@@ -450,8 +428,8 @@ class WebViewWebSocketService(threading.Thread):
             return
         payload = {
             "type": "pcb_status",
+            "device_id": self.device_id,
             "data": {
-                "kiosk_id": self.kiosk_id,
                 "status": status.model_dump(),
                 "timestamp": int(time.time()),
             },

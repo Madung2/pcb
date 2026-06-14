@@ -21,6 +21,31 @@ from .env_utils import update_env_file
 logger = logging.getLogger(__name__)
 
 
+def build_device_websocket_url(websocket_addr: str, device_id: str) -> str:
+    """WEBSOCKET_ADDR 에 device_id 쿼리를 추가하거나 기존 값을 교체합니다."""
+    base_url = (websocket_addr or "").strip()
+    did = (device_id or "").strip()
+    if not base_url or not did:
+        return base_url
+
+    parsed = urllib.parse.urlparse(base_url)
+    query_items = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    updated = False
+    out: list[tuple[str, str]] = []
+    for name, value in query_items:
+        if name.lower() in ("device_id", "deviceid"):
+            out.append((name, did))
+            updated = True
+        else:
+            out.append((name, value))
+    if not updated:
+        out.append(("device_id", did))
+
+    return urllib.parse.urlunparse(
+        parsed._replace(query=urllib.parse.urlencode(out, doseq=True))
+    )
+
+
 def _extract_meet_url(data: dict) -> str:
     payload = data.get("data")
     candidates = [
@@ -115,6 +140,37 @@ def _send_screenshot(ws, device_id: str) -> None:  # ysoh 2026-06-14
 # 서버 명령 처리
 # ---------------------------------------------------------------------------
 
+def _apply_change_base_url(data: dict) -> None:
+    """서버 ``change_base_url`` 명령을 config 및 .env 에 반영합니다.
+
+    ``base_url`` 과 선택적 ``websocket_addr`` 를 저장합니다.
+    화면·WebSocket 재연결은 즉시 하지 않으며, 앱 재시작 후 적용됩니다.
+    """
+    new_url = (data.get("base_url") or "").strip()
+    new_ws_addr = (data.get("websocket_addr") or "").strip()
+    updated = False
+
+    if new_url:
+        logger.info("[WS 명령] change_base_url → BASE_URL=%s", new_url)
+        config.base_url = new_url
+        update_env_file("BASE_URL", new_url)
+        updated = True
+    else:
+        logger.warning("[WS 명령] change_base_url: base_url 비어있음")
+
+    if new_ws_addr:
+        logger.info("[WS 명령] change_base_url → WEBSOCKET_ADDR=%s", new_ws_addr)
+        config.websocket_addr = new_ws_addr
+        config.webview_ws_url = new_ws_addr
+        update_env_file("WEBSOCKET_ADDR", new_ws_addr)
+        updated = True
+
+    if updated:
+        logger.info(
+            "[WS 명령] change_base_url 저장 완료 — 재시작 후 BASE_URL/WEBSOCKET_ADDR 적용"
+        )
+
+
 def _handle_server_message(  # ysoh 2026-06-14
     data: dict,
     ws,
@@ -135,14 +191,7 @@ def _handle_server_message(  # ysoh 2026-06-14
         return
 
     if msg_type == "change_base_url":
-        new_url = data.get("base_url", "").strip()
-        if new_url:
-            logger.info("[WS 명령] change_base_url → %s", new_url)
-            config.base_url = new_url
-            update_env_file("BASE_URL", new_url)
-            # TODO: ysoh 2026-06-14 — WebView URL 변경 로직 추가 예정
-        else:
-            logger.warning("[WS 명령] change_base_url: base_url 비어있음")
+        _apply_change_base_url(data)
 
     elif msg_type == "restart":
         logger.info("[WS 명령] restart → 프로그램 재시작")
@@ -185,12 +234,7 @@ def run_device_websocket(  # ysoh 2026-06-14
         )
         return
 
-    # device_id 쿼리 파라미터 추가
-    sep = "&" if "?" in websocket_addr else "?"
-    ws_url = (
-        f"{websocket_addr}{sep}"
-        f"device_id={urllib.parse.quote(device_id)}"
-    )
+    ws_url = build_device_websocket_url(websocket_addr, device_id)
 
     def _send_alive(ws) -> None:
         payload = json.dumps({
@@ -202,7 +246,7 @@ def run_device_websocket(  # ysoh 2026-06-14
 
     while True:
         try:
-            logger.info("WebSocket 연결 시도: %s", ws_url)
+            logger.info("WebSocket connect 호출 직전: url=%s", ws_url)
             with ws_sync.connect(ws_url) as ws:
                 logger.info("WebSocket 연결 성공!")
 

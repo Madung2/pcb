@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable
 
 from .background_browser import (
-    launch_foreground_browser,
+    launch_background_browser,
     shutdown_background_browser,
 )
 from .config import config
@@ -34,7 +34,7 @@ def person_detected_ws_payload() -> dict[str, object]:
     """사람 최초 재실 시 백엔드로 보내는 WebSocket JSON 본문."""
     return {
         "event": _PERSON_DETECTED_EVENT,
-        "kiosk_id": config.kiosk_id,
+        "device_id": config.device_id,
     }
 
 
@@ -187,8 +187,9 @@ class KioskMonitorHandlers:
         logger.info(f"[동작] 왼쪽만 눌림 → 도어 오픈")
 
     def _open_guidance_center_on_right_only(self) -> None:
-        """MeetOne 등을 통합 WebView가 있으면 그 화면으로, 없으면 전면 브라우저로 연다.
+        """MeetOne 등을 통합 WebView가 있으면 그 화면으로, 없으면 백그라운드 브라우저로 연다.
 
+        키오스크 WebView가 최상단에 남도록 MeetOne은 포커스를 빼앗지 않는 방식으로 실행한다.
         ``meet_web_url`` 은 서버 WebSocket 메시지의 ``meet_url`` 로 채워진다.
         """
         self._open_guidance_center(button_label="오른쪽만 눌림")
@@ -200,8 +201,7 @@ class KioskMonitorHandlers:
                 self._ws_bridge.schedule_send(
                     {
                         "type": "get_meet_url",
-                        "device_id": config.device_id or config.kiosk_id,
-                        "kiosk_id": config.kiosk_id,
+                        "device_id": config.device_id,
                     }
                 )
             logger.warning(
@@ -216,13 +216,13 @@ class KioskMonitorHandlers:
                 return
             except Exception:
                 logger.exception("[동작] %s → Meet 내장 WebView 이동 실패", button_label)
-        launch_foreground_browser(
+        launch_background_browser(
             url,
             session_key=SESSION_MEET_WEB,
             timeout_sec=config.background_browser_timeout_seconds,
             browser_cmd_template=config.kiosk_browser_cmd,
         )
-        logger.info("[동작] %s → Meet 전면 브라우저: %s", button_label, url)
+        logger.info("[동작] %s → Meet 백그라운드 브라우저: %s", button_label, url)
 
     def _close_door_on_both_buttons(self) -> None:
         self._controller.close_door()
