@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shlex
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 from shutil import which
 
 logger = logging.getLogger(__name__)
@@ -23,29 +26,60 @@ _SESSION_LOCK = threading.Lock()
 _sessions: dict[str, tuple[subprocess.Popen | None, threading.Timer | None]] = {}
 
 
-def _background_browser_flags() -> list[str]:
+def _safe_session_name(session_key: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", session_key or "default").strip("._")
+    return safe or "default"
+
+
+def _background_browser_profile_arg(session_key: str) -> str | None:
+    """Windows Chrome이 기존 인스턴스에 위임 후 즉시 종료하지 않도록 전용 프로필을 쓴다."""
+    if sys.platform != "win32":
+        return None
+    profile_dir = os.path.join(
+        tempfile.gettempdir(),
+        "jdone_kiosk_background_browser",
+        _safe_session_name(session_key),
+    )
+    os.makedirs(profile_dir, exist_ok=True)
+    return f"--user-data-dir={profile_dir}"
+
+
+def _background_browser_flags(session_key: str = "") -> list[str]:
     """포커스를 빼앗지 않도록 최소화·부가 플래그."""
-    return [
+    flags = [
         "--new-window",
         "--start-minimized",
         "--no-first-run",
+        "--no-default-browser-check",
         "--disable-session-crashed-bubble",
     ]
+    profile_arg = _background_browser_profile_arg(session_key)
+    if profile_arg:
+        flags.append(profile_arg)
+    return flags
 
 
-def _apply_background_flags(argv: list[str]) -> list[str]:
+def _apply_background_flags(argv: list[str], session_key: str) -> list[str]:
     """명시 브라우저 명령에도 백그라운드 플래그를 보강."""
     if not argv:
         return argv
     merged = [argv[0]]
-    for flag in _background_browser_flags():
+    has_user_data_dir = any(a.startswith("--user-data-dir=") for a in argv)
+    for flag in _background_browser_flags(session_key):
+        if flag.startswith("--user-data-dir=") and has_user_data_dir:
+            continue
         if flag not in argv:
             merged.append(flag)
     merged.extend(argv[1:])
     return merged
 
 
-def _default_browser_argv(url: str, *, background: bool) -> list[str] | None:
+def _default_browser_argv(
+    url: str,
+    *,
+    background: bool,
+    session_key: str = "",
+) -> list[str] | None:
     if sys.platform == "darwin":
         if background:
             # ``-g``: Finder/앱 전환 없이 백그라운드로 열기
@@ -69,14 +103,14 @@ def _default_browser_argv(url: str, *, background: bool) -> list[str] | None:
         for p in candidates:
             if p and os.path.isfile(p):
                 if background:
-                    return [p, *_background_browser_flags(), url]
+                    return [p, *_background_browser_flags(session_key), url]
                 return [p, "--new-window", url]
         return None
     for name in ("google-chrome", "chromium", "chromium-browser"):
         path = which(name)
         if path:
             if background:
-                return [path, *_background_browser_flags(), url]
+                return [path, *_background_browser_flags(session_key), url]
             return [path, "--new-window", url]
     return None
 
@@ -106,6 +140,59 @@ def _popen_browser(argv: list[str], *, background: bool) -> subprocess.Popen:
     else:
         kwargs["start_new_session"] = True
     return subprocess.Popen(argv, **kwargs)
+
+
+def _minimize_windows_for_pid(pid: int) -> int:
+    """Windows에서 특정 PID가 소유한 top-level 창을 최소화한다."""
+    if sys.platform != "win32" or not pid:
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except Exception:
+        return 0
+
+    user32 = ctypes.windll.user32
+    enum_windows = user32.EnumWindows
+    enum_windows_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    get_window_thread_process_id = user32.GetWindowThreadProcessId
+    is_window_visible = user32.IsWindowVisible
+    show_window = user32.ShowWindow
+    target_pid = int(pid)
+    minimized = 0
+
+    def _callback(hwnd, _lparam):
+        nonlocal minimized
+        proc_id = wintypes.DWORD()
+        get_window_thread_process_id(hwnd, ctypes.byref(proc_id))
+        if proc_id.value == target_pid and is_window_visible(hwnd):
+            # SW_MINIMIZE. Chrome이 foreground로 떠도 즉시 작업 표시줄로 내린다.
+            show_window(hwnd, 6)
+            minimized += 1
+        return True
+
+    try:
+        enum_windows(enum_windows_proc(_callback), 0)
+    except Exception:
+        return minimized
+    return minimized
+
+
+def _start_background_window_guard(proc: subprocess.Popen) -> None:
+    """Windows Chrome 창이 WebView 위로 올라오지 않게 초기 몇 초 동안 반복 최소화."""
+    if sys.platform != "win32":
+        return
+
+    def _guard() -> None:
+        for _ in range(20):
+            if proc.poll() is not None:
+                return
+            count = _minimize_windows_for_pid(proc.pid)
+            if count:
+                logger.debug("백그라운드 브라우저 창 최소화: pid=%s windows=%s", proc.pid, count)
+            time.sleep(0.25)
+
+    threading.Thread(target=_guard, name="background-browser-window-guard", daemon=True).start()
 
 
 def _terminate_process_tree(proc: subprocess.Popen) -> None:
@@ -216,9 +303,13 @@ def launch_browser_session(
     if browser_cmd_template.strip():
         argv = _browser_argv_from_config(browser_cmd_template.strip(), url)
         if background and argv and sys.platform == "win32":
-            argv = _apply_background_flags(argv)
+            argv = _apply_background_flags(argv, session_key)
     else:
-        argv = _default_browser_argv(url, background=background)
+        argv = _default_browser_argv(
+            url,
+            background=background,
+            session_key=session_key,
+        )
 
     if not argv:
         logger.warning(
@@ -232,6 +323,8 @@ def launch_browser_session(
             with _SESSION_LOCK:
                 _kill_session_locked(session_key)
             proc = _popen_browser(argv, background=background)
+            if background:
+                _start_background_window_guard(proc)
         except Exception as e:
             logger.error(f"브라우저 실행 실패 ({session_key}): {e}")
             return
