@@ -10,7 +10,7 @@ BASE_URL=https://hcg.jdone.co.kr/
 DEFAULT_URL=https://hcg.jdone.co.kr
 DEVICE_API_BASE_URL=https://hcg.jdone.co.kr
 DEVICE_API_TIMEOUT=10.0
-WEBSOCKET_ADDR=wss://hcg.jdone.co.kr/ws/device
+WEBSOCKET_ADDR=wss://hcg.jdone.co.kr/api/ws/device
 
 # 시리얼 포트 설
 SERIAL_PORT=COM8
