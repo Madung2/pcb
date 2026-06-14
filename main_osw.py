@@ -175,21 +175,10 @@ def main() -> int:
         logger.exception("초기화 단계 예외: %s", e)
         return 1
 
-    # [수정] webview / cli 실행부도 try/except 로 감싸 자동 복구 적용.
-    if config.webview_enabled:
-        from kiosk_module.webview_app import run_integrated_app
-
-        try:
-            return run_integrated_app(port, config.serial_baudrate)
-        except KeyboardInterrupt:
-            raise
-        except Exception as e:
-            logger.exception("웹뷰 통합 앱 실행 중 예외: %s", e)
-            return 1
-
     if not config.pcb_control_enabled:
         logger.info(
-            "스마트폴 모드 + WEBVIEW_ENABLED=false — 실행할 작업이 없어 종료합니다."
+            "ASSET_DEVICE_TYPE=%s — PCB 제어 비활성화, 실행할 작업이 없어 종료합니다.",
+            config.asset_device_type,
         )
         return 0
 

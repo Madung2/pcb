@@ -312,12 +312,8 @@ def main() -> int:  # ysoh 2026-06-14
         if port != config.serial_port.strip():
             logger.info("시리얼 포트(자동): %s", port)
 
-    if config.webview_enabled:
-        from kiosk_module.webview_app import run_integrated_app
-        return run_integrated_app(port, config.serial_baudrate)
-
     if not config.pcb_control_enabled:
-        logger.info("스마트폴 모드 + WEBVIEW_ENABLED=false — 종료")
+        logger.info("ASSET_DEVICE_TYPE=%s — PCB 제어 비활성화, 종료", config.asset_device_type)
         return 0
 
     asyncio.run(run_cli_main(port))

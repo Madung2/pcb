@@ -92,6 +92,7 @@ DEPRECATED_GUI_ENV_KEYS = {
     "SERIAL_BAUDRATE",
     "SERIAL_PORT_DESCRIPTION_KEYWORD",
     "WS_ENABLED",
+    "WEBVIEW_ENABLED",
     "WEBVIEW_TRAY_ENABLED",
     "VOLUME_SERIAL_ENABLED",
     "VOLUME_BAUDRATE",
@@ -420,7 +421,7 @@ def _run_webview_cli(port: str, baud: int) -> int:
 
     # ysoh 2026-06-13: macOS(darwin)도 허용
     if sys.platform not in ("win32", "darwin"):
-        log.error("WEBVIEW_ENABLED 모드는 Windows 또는 macOS에서만 지원합니다.")
+        log.error("통합 WebView 모드는 Windows 또는 macOS에서만 지원합니다.")
         return 1
 
     from kiosk_module.webview_app import run_integrated_app
@@ -630,17 +631,10 @@ class KioskApp(QMainWindow):
 
         form_root.addWidget(volume_box)
 
-        # ─── 통합 WebView (Windows / macOS) ───  # ysoh 2026-06-13
-        webview_box = QGroupBox("통합 WebView (Windows / macOS)")
+        # ─── WebView 옵션 ───  # ysoh 2026-06-13
+        webview_box = QGroupBox("WebView 옵션")
         webview_form = QFormLayout(webview_box)
         _configure_form_layout(webview_form)
-
-        self.webview_enabled_cb = QCheckBox("WEBVIEW_ENABLED")
-        self.webview_enabled_cb.setToolTip(
-            "켜면 연결 시 설정 GUI 는 이 창에 두고, 통합 WebView(전체화면)는 "
-            "별도 프로세스 main thread 에서 실행됩니다. Windows / macOS 지원."
-        )
-        webview_form.addRow(self.webview_enabled_cb)
 
         self.webview_devtools_cb = QCheckBox("WEBVIEW_DEVTOOLS")
         webview_form.addRow(self.webview_devtools_cb)
@@ -745,7 +739,6 @@ class KioskApp(QMainWindow):
         self.status_poll_spin.setValue(
             float(os.getenv("STATUS_POLL_INTERVAL", "600"))
         )
-        self.webview_enabled_cb.setChecked(config.webview_enabled)
         self.webview_devtools_cb.setChecked(config.webview_devtools)
         self.vacant_idle_spin.setValue(float(config.vacant_idle_close_seconds))
         self.browser_timeout_spin.setValue(
@@ -785,7 +778,6 @@ class KioskApp(QMainWindow):
         config.serial_port_description_keyword = "USB"
         config.ws_enabled = True
         config.ws_reconnect_interval = float(self.ws_reconnect_spin.value())
-        config.webview_enabled = self.webview_enabled_cb.isChecked()
         config.webview_ws_url = config.websocket_addr
         config.webview_devtools = self.webview_devtools_cb.isChecked()
         config.webview_tray_enabled = True
@@ -1220,7 +1212,6 @@ class KioskApp(QMainWindow):
             ("SERIAL_PORT", config.serial_port or ""),
             ("VOLUME_SERIAL_PORT", config.volume_serial_port or ""),
             ("WS_RECONNECT_INTERVAL", f"{float(config.ws_reconnect_interval):g}"),
-            ("WEBVIEW_ENABLED", "true" if config.webview_enabled else "false"),
             ("WEBVIEW_DEVTOOLS", "true" if config.webview_devtools else "false"),
             ("VACANT_IDLE_CLOSE_SECONDS", f"{float(config.vacant_idle_close_seconds):g}"),
             ("INPUT_MONITOR_ENABLED", "true" if config.input_monitor_enabled else "false"),

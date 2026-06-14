@@ -87,7 +87,6 @@ def _apply_env_to_main_config(monkeypatch, env: dict[str, str]) -> None:
     )
     monkeypatch.setattr(cfg, "volume_serial_port", env["VOLUME_SERIAL_PORT"])
     monkeypatch.setattr(cfg, "volume_serial_baudrate", STATIC_VOLUME_BAUDRATE)
-    monkeypatch.setattr(cfg, "webview_enabled", _env_bool(env["WEBVIEW_ENABLED"]))
     monkeypatch.setattr(
         cfg,
         "background_browser_timeout_seconds",
@@ -195,7 +194,6 @@ def test_env_kiosk_starts_kiosk_screen_and_run_kiosk_worker(monkeypatch) -> None
 def test_hidden_meetone_flow(monkeypatch) -> None:
     env = _read_env_file()
     assert env["ASSET_DEVICE_TYPE"] == "KIOSK"
-    assert env["WEBVIEW_ENABLED"] == "false"
 
     _apply_env_to_main_config(monkeypatch, env)
 

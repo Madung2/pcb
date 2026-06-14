@@ -58,7 +58,6 @@ uv sync --group dev
 | ----------------------- | ------------------------ | -------------------------- |
 | `SERIAL_PORT`           | `COM3`                   | 시리얼 포트 이름                  |
 | `WS_RECONNECT_INTERVAL` | `5.0`                    | 끊김 후 재연결 대기(초)             |
-| `WEBVIEW_ENABLED`       | `false`                  | Windows 통합 WebView 모드 활성화 |
 | `DEVICE_ID`             | *(비움)*                 | 백엔드 장치 식별자. API/WebSocket 모두 `device_id`로 전송 |
 | `WEBSOCKET_ADDR`        | *(비움)*                 | 백엔드·웹뷰 공통 WS URL. `device_id` 쿼리는 실행 시 자동 추가 |
 | `WEBVIEW_DEVTOOLS`      | `false`                  | `pywebview` 개발자 도구 노출 |
@@ -75,8 +74,7 @@ uv run python main.py
 
 - 시리얼 연결에 실패하면 프로세스가 종료됩니다.
 - **Ctrl+C**로 종료하면 (켜져 있으면) WS 종료, 시리얼 닫기 순으로 정리합니다.
-- `WEBVIEW_ENABLED=true` 이면 같은 `main.py`가 Windows 전용 통합 WebView 모드로 실행됩니다.
-- 이 모드에서는 PCB 루프가 백그라운드 워커로 돌고, 오른쪽 버튼 이벤트가 외부 Chrome 대신 내장 웹뷰를 엽니다.
+- 실행 모드는 `ASSET_DEVICE_TYPE`에 따라 결정됩니다.
 
 ### 단일 실행 파일 빌드 (예시)
 

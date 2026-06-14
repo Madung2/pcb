@@ -615,7 +615,7 @@ def run_integrated_app(serial_port: str, serial_baudrate: int) -> int:
     import sys
     if sys.platform not in ("win32", "darwin"):
         raise RuntimeError(
-            "WEBVIEW_ENABLED 모드는 Windows 또는 macOS에서만 지원합니다."
+            "통합 WebView 모드는 Windows 또는 macOS에서만 지원합니다."
         )
 
     logger.info("run_integrated_app 시작 port=%r baud=%s", serial_port, serial_baudrate)

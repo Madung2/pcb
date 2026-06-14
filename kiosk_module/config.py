@@ -72,9 +72,6 @@ class Config:
         os.getenv("WS_RECONNECT_INTERVAL", "5.0")
     )
 
-    # webview_enabled: bool = _env_bool("WEBVIEW_ENABLED", default=False)
-    # ysoh 2026-06-13
-    webview_enabled: bool = _env_bool("WEBVIEW_ENABLED", default=True)
     webview_ws_url: str = field(default_factory=_webview_ws_url_from_env)
     webview_devtools: bool = _env_bool("WEBVIEW_DEVTOOLS", default=False)
     webview_tray_enabled: bool = True
@@ -139,8 +136,7 @@ class Config:
             f"{(' SER=' + self.serial_usb_serial) if self.serial_usb_serial else ''},\n"
             f"  ws_enabled={self.ws_enabled}, "
             f"ws_bridge_url={self.effective_ws_bridge_url()!r},\n"
-            f"  webview_enabled={self.webview_enabled}, "
-            f"webview_ws_url={self.webview_ws_url},\n"
+            f"  webview_ws_url={self.webview_ws_url},\n"
             f"  vacant_idle_close={self.vacant_idle_close_seconds}s,\n"
             f"  input_monitor={self.input_monitor_enabled},\n"
             f"  meet_url_set={bool(self.meet_web_url)},\n"

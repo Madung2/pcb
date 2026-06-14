@@ -20,11 +20,7 @@ VOLUME_SERIAL_PORT=COM10
 # WebSocket (백엔드 연동 시 true). device_id 쿼리는 실행 시 자동 추가.
 WS_RECONNECT_INTERVAL=5.0
 
-# 통합 WebView 모드 (Windows 전용)
-# ysoh 2026-06-13
-WEBVIEW_ENABLED=false
-
-
+# WebView 옵션
 WEBVIEW_DEVTOOLS=true
 
 # 사람 없음 + 입력 유휴 시 자동 도어 닫기 (초, INPUT_MONITOR_ENABLED 필요)
