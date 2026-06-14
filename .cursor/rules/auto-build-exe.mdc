@@ -1,0 +1,28 @@
+---
+description: GUI/키오스크 코드 변경 후 JDoneKiosk.exe 자동 빌드
+globs:
+  - gui_main.py
+  - kiosk_gui.spec
+  - default.env
+  - kiosk_module/**
+alwaysApply: false
+---
+
+# 변경 후 exe 자동 빌드
+
+`gui_main.py`, `kiosk_module/`, `default.env`, `kiosk_gui.spec` 등 **실행 산출물에 영향 주는 코드·설정을 수정한 뒤**, 사용자가 별도로 말하지 않아도 **PyInstaller 빌드를 끝까지 수행**한다.
+
+## 빌드 절차
+
+1. 실행 중 `JDoneKiosk.exe` 가 있으면 종료 시도
+2. 프로젝트 루트에서:
+   `.venv\Scripts\python.exe -m PyInstaller kiosk_gui.spec --clean --noconfirm`
+3. 성공 시 `dist\JDoneKiosk.exe` 경로를 응답에 명시
+
+## 예외 (빌드 생략)
+
+- 질문만 하고 코드를 바꾸지 않은 경우
+- README·주석만 수정한 경우
+- 사용자가 "빌드 하지 마"라고 한 경우
+
+빌드 실패(파일 잠금 등) 시 원인과 다음 조치를 짧게 알린다.

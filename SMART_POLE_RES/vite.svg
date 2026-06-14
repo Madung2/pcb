@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+    <head>
+        <meta charset="UTF-8" />
+        <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+        <link rel="icon" href="/favicon.ico" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>합천 스마트 플랫폼</title>
+      <script type="module" crossorigin src="/assets/index-3gtM9ni-.js"></script>
+      <link rel="modulepreload" crossorigin href="/assets/ol-vendor-BYqn2az2.js">
+      <link rel="stylesheet" crossorigin href="/assets/index-_KDcQn9j.css">
+    </head>
+    <body>
+        <div id="root"></div>
+        <div
+            id="map-controls-portal"
+            style="position: fixed; inset: 0; pointer-events: none; z-index: 9999;"
+            aria-hidden="true"
+        ></div>
+    </body>
+</html>

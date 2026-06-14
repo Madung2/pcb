@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kiosk-module"
+version = "1.0.0"
+description = "GPS SMART KIOSK PCB serial communication and WebSocket bridge"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pillow>=10.4.0",
+    "pyserial>=3.5",
+    "pystray>=0.19.5",
+    "websockets>=12.0",
+    "pywebview",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0",
+    "pynput>=1.7.7",
+    "geocoder>=1.38.1",
+    "pyproj>=3.6",
+]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.20.0",
+    "pytest>=8.0",
+]
+
+gui = [
+    "PyQt5==5.15.11",
+    "PyQt5-Qt5==5.15.2; sys_platform == 'win32'",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["kiosk_module"]
+[tool.uv]
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
+[tool.uv.sources]
+pywebview = { git = "https://github.com/JDONE-Research/pywebview", branch = "master" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+norecursedirs = ["tests/hw"]
+# 테스트 실행 중 INFO 이상 로그를 터미널에 실시간 출력 (끌 때: pytest -o log_cli=false)
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
+log_cli_date_format = "%H:%M:%S"

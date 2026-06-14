@@ -1,0 +1,53 @@
+
+
+# 백엔드에서 키오스크 구분 (WebSocket PERSON_DETECTED 등)
+# KIOSK_ID=
+# ysoh 2026-06-13 or KIOSK or POLE_N_ED
+#ASSET_DEVICE_TYPE=SMART_POLE
+#DEVICE_ID=126763f1-d7bb-4744-a478-8bb98510343a
+ASSET_DEVICE_TYPE=POLE_N_ED
+DEVICE_ID=126763f1-d7bb-4744-a478-8bb98510343a
+
+
+# ysoh 2026-06-14: 송출 URL / 기본 URL / WebSocket
+BASE_URL=https://hcg.jdone.co.kr/
+DEFAULT_URL=https://hcg.jdone.co.kr
+DEVICE_API_BASE_URL=https://hcg.jdone.co.kr
+DEVICE_API_TIMEOUT=10.0
+WEBSOCKET_ADDR=wss://hcg.jdone.co.kr/ws/device
+
+# 시리얼 포트 설
+SERIAL_PORT=COM8
+SERIAL_BAUDRATE=115200
+SERIAL_PORT_DESCRIPTION_KEYWORD=USB
+
+VOLUME_SERIAL_ENABLED=false
+VOLUME_SERIAL_PORT=COM10
+VOLUME_BAUDRATE=38400
+
+# WebSocket (백엔드 연동 시 true). URL 은 엔드포인트 websocket_url / 캐시 우선. 수동 시 WEBVIEW_WS_URL.
+WS_ENABLED=true
+WS_RECONNECT_INTERVAL=5.0
+
+# 통합 WebView 모드 (Windows 전용)
+# ysoh 2026-06-13
+WEBVIEW_ENABLED=false
+
+
+WEBVIEW_DEVTOOLS=true
+WEBVIEW_TRAY_ENABLED=true
+
+# 사람 없음 + 입력 유휴 시 자동 도어 닫기 (초, INPUT_MONITOR_ENABLED 필요)
+VACANT_IDLE_CLOSE_SECONDS=20.0
+
+INPUT_MONITOR_ENABLED=true
+
+# PCB status 조회 주기 (초). 600 = 10분
+STATUS_POLL_INTERVAL=600
+
+# 오른쪽 버튼 Meet/웹 브라우저
+# Meet URL은 서버 WebSocket 메시지로 수신
+BACKGROUND_BROWSER_TIMEOUT_SECONDS=600
+
+# 로그 레벨 (DEBUG, INFO, WARNING, ERROR)
+LOG_LEVEL=INFO

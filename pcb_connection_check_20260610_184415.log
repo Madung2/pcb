@@ -1,0 +1,30 @@
+
+== PCB Connection Check ==
+Started         : 2026-06-10 18:44:15
+Program folder  : C:\Users\jdone\test\kiosk_pcb_controller
+Working folder  : C:\Users\jdone\test\kiosk_pcb_controller
+Log file        : C:\Users\jdone\test\kiosk_pcb_controller\pcb_connection_check_20260610_184415.log
+Status TX frame : 02 53 00 53 03
+
+== Detected serial ports ==
+- COM1 - 통신 포트(COM1) | HWID=ACPI\PNP0501\0
+
+== Test plan ==
+Mode     : single selected port
+Baudrate : 115200
+Timeout  : 0.1s
+Attempts : 1
+- COM999: command line --port
+
+== Port COM999 ==
+Reason   : command line --port
+Baudrate : 115200
+Timeout  : 0.1s
+Attempts : 1
+OPEN: FAIL (COM999) - could not open port 'COM999': FileNotFoundError(2, '지정된 파일을 찾을 수 없습니다.', None, 2)
+Hint: close the kiosk app, serial monitor, or any other program that may already be using this COM port.
+
+== Result ==
+- COM999: OPEN FAIL
+
+FAIL: Every tested port failed to open.
