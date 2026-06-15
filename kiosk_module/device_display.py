@@ -21,6 +21,56 @@ from .config import config
 logger = logging.getLogger(__name__)
 
 
+def _coerce_window_handle(value: object | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        hwnd = int(value)
+    except (TypeError, ValueError):
+        return None
+    return hwnd if hwnd > 0 else None
+
+
+def _webview_window_handle(window: object | None) -> int | None:
+    if window is None:
+        return None
+    candidates = [window, getattr(window, "native", None)]
+    for obj in candidates:
+        if obj is None:
+            continue
+        for name in ("Handle", "handle", "HWND", "hwnd"):
+            hwnd = _coerce_window_handle(getattr(obj, name, None))
+            if hwnd:
+                return hwnd
+    return None
+
+
+def _disable_windows_rounded_corners(window: object | None) -> None:
+    """Windows 11 native window 둥근 모서리를 제거해 전광판 창을 직각으로 만든다."""
+    if sys.platform != "win32":
+        return
+    hwnd = _webview_window_handle(window)
+    if not hwnd:
+        logger.debug("전광판 창 핸들을 찾지 못해 둥근 모서리 제거를 건너뜁니다.")
+        return
+    try:
+        import ctypes
+
+        DWMWA_WINDOW_CORNER_PREFERENCE = 33
+        DWMWCP_DONOTROUND = 1
+        value = ctypes.c_int(DWMWCP_DONOTROUND)
+        result = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            ctypes.c_void_p(hwnd),
+            ctypes.c_uint(DWMWA_WINDOW_CORNER_PREFERENCE),
+            ctypes.byref(value),
+            ctypes.sizeof(value),
+        )
+        if result != 0:
+            logger.debug("DwmSetWindowAttribute 실패: hwnd=%s result=%s", hwnd, result)
+    except Exception:
+        logger.debug("전광판 창 둥근 모서리 제거 실패", exc_info=True)
+
+
 # ---------------------------------------------------------------------------
 # pywebview GUI 백엔드 선택
 # ---------------------------------------------------------------------------
@@ -114,25 +164,35 @@ def pole_n_ed_display(  # ysoh 2026-06-14
     fullscreen: bool = True,
     width: int = 1280,
     height: int = 800,
-    second_width: int = 320,
-    second_height: int = 140,
+    second_width: int | None = None,
+    second_height: int | None = None,
+    second_x_offset: int | None = None,
+    second_y_offset: int | None = None,
 ) -> int:
     """POLE_N_ED 전용 듀얼 디스플레이 WebView 표시.
 
     - 1번째 창: 기본 URL → HDMI 1st display (전체화면)
-    - 2번째 창: ``base_url + led_url`` → HDMI 2nd display (좌측상단 0,0 기준, 320x140)
+    - 2번째 창: ``base_url + led_url`` → HDMI 2nd display (좌측상단 보정값 기준, 기본 330x160)
 
     Args:
         url: 기본 송출 URL (device_id 쿼리 파라미터 포함)
         title: 1번째 창 제목
         fullscreen: 1번째 창 전체화면 여부
         width/height: 1번째 창 윈도우 모드 크기
-        second_width: 2번째 창 가로 크기 (기본 320)
-        second_height: 2번째 창 세로 크기 (기본 140)
+        second_width: 2번째 창 가로 크기 (기본 config/env 330)
+        second_height: 2번째 창 세로 크기 (기본 config/env 160)
     """
     import webview
 
     backend = _gui_backend()
+    second_width = config.pole_n_ed_second_width if second_width is None else second_width
+    second_height = config.pole_n_ed_second_height if second_height is None else second_height
+    second_x_offset = (
+        config.pole_n_ed_second_x_offset if second_x_offset is None else second_x_offset
+    )
+    second_y_offset = (
+        config.pole_n_ed_second_y_offset if second_y_offset is None else second_y_offset
+    )
 
     # 연결된 스크린 목록 조회
     available_screens = webview.screens
@@ -164,13 +224,13 @@ def pole_n_ed_display(  # ysoh 2026-06-14
     if screen_count >= 2:
         # 2번째 모니터가 있으면 해당 스크린에 배치
         second_screen = available_screens[1]
-        second_x = int(getattr(second_screen, "x", 0) or 0)
-        second_y = int(getattr(second_screen, "y", 0) or 0)
+        second_x = int(getattr(second_screen, "x", 0) or 0) + int(second_x_offset)
+        second_y = int(getattr(second_screen, "y", 0) or 0) + int(second_y_offset)
         logger.info(
             "2nd display: url=%s screen=%s x=%d y=%d size=%dx%d",
             url_2, second_screen, second_x, second_y, second_width, second_height,
         )
-        webview.create_window(
+        second_window = webview.create_window(
             title=f"{title} - 2nd",
             url=url_2,
             width=second_width,
@@ -189,20 +249,24 @@ def pole_n_ed_display(  # ysoh 2026-06-14
             "2nd HDMI 디스플레이 미감지 (screens=%d) → 1st 모니터에 윈도우로 표시",
             screen_count,
         )
-        webview.create_window(
+        second_window = webview.create_window(
             title=f"{title} - 2nd",
             url=url_2,
             width=second_width,
             height=second_height,
-            x=0,
-            y=0,
+            x=int(second_x_offset),
+            y=int(second_y_offset),
             resizable=False,
             fullscreen=False,
             frameless=True,
             background_color="#000000",
         )
 
+    def _after_start() -> None:
+        _disable_windows_rounded_corners(second_window)
+
     webview.start(
+        _after_start,
         gui=backend,
         debug=config.log_level.upper() == "DEBUG",
     )

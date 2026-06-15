@@ -23,6 +23,10 @@ DEFAULT_KIOSK_BROWSER_CMD = ""
 DEFAULT_VOLUME_BAUDRATE = 38400
 DEFAULT_VOLUME_HEX_CODES: frozenset[str] = frozenset()
 PCB_EVENT_POLL_INTERVAL_SECONDS = 0.2
+DEFAULT_POLE_N_ED_SECOND_WIDTH = 330
+DEFAULT_POLE_N_ED_SECOND_HEIGHT = 160
+DEFAULT_POLE_N_ED_SECOND_X_OFFSET = -3
+DEFAULT_POLE_N_ED_SECOND_Y_OFFSET = -3
 WEBVIEW_WS_RECONNECT_DELAY_SECONDS = 30.0
 STATUS_POLL_INTERVAL_SECONDS = float(os.getenv("STATUS_POLL_INTERVAL", "600"))
 
@@ -76,6 +80,20 @@ class Config:
     webview_ws_url: str = field(default_factory=_webview_ws_url_from_env)
     webview_devtools: bool = _env_bool("WEBVIEW_DEVTOOLS", default=False)
     webview_tray_enabled: bool = True
+
+    # POLE_N_ED 2nd 전광판 WebView. Windows 11의 둥근 native 창 모서리는 display 쪽에서 제거.
+    pole_n_ed_second_width: int = int(
+        os.getenv("POLE_N_ED_SECOND_WIDTH", str(DEFAULT_POLE_N_ED_SECOND_WIDTH))
+    )
+    pole_n_ed_second_height: int = int(
+        os.getenv("POLE_N_ED_SECOND_HEIGHT", str(DEFAULT_POLE_N_ED_SECOND_HEIGHT))
+    )
+    pole_n_ed_second_x_offset: int = int(
+        os.getenv("POLE_N_ED_SECOND_X_OFFSET", str(DEFAULT_POLE_N_ED_SECOND_X_OFFSET))
+    )
+    pole_n_ed_second_y_offset: int = int(
+        os.getenv("POLE_N_ED_SECOND_Y_OFFSET", str(DEFAULT_POLE_N_ED_SECOND_Y_OFFSET))
+    )
 
     # 사람 없음 + 입력 유휴 시 자동 도어 닫기 (초).
     # 전제: pynput이 동작해야 유휴 시간이 증가함(기본 20초).
@@ -138,6 +156,10 @@ class Config:
             f"  ws_enabled={self.ws_enabled}, "
             f"ws_bridge_url={self.effective_ws_bridge_url()!r},\n"
             f"  webview_ws_url={self.webview_ws_url},\n"
+            f"  pole_n_ed_second={self.pole_n_ed_second_width}x"
+            f"{self.pole_n_ed_second_height}"
+            f" offset={self.pole_n_ed_second_x_offset},"
+            f"{self.pole_n_ed_second_y_offset},\n"
             f"  vacant_idle_close={self.vacant_idle_close_seconds}s,\n"
             f"  input_monitor={self.input_monitor_enabled},\n"
             f"  meet_url_set={bool(self.meet_web_url)},\n"
